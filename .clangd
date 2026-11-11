@@ -1,0 +1,5 @@
+# the editor ( clangd ) only : headers that no .cpp includes yet get the flags of a neighbour file of compile_commands.json , and the path of Streamline is not there
+# keep it in sync with STREAMLINE_DIR of CMakeLists.txt
+CompileFlags:
+  Add:
+    - -IC:/Users/mosha/sdk/streamline-release-2.14.16/extracted/include

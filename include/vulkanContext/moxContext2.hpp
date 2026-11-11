@@ -1,0 +1,525 @@
+#ifndef base_HPP
+#define base_HPP
+
+#include <vulkan/vulkan.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include "../shaderStructures/shaderStructure.h"
+
+#include <iostream>
+#include "../logger/logger.hpp"
+
+#include <memory>
+
+#include "Instance.hpp"
+#include "FamilyDetails.hpp"
+#include "Window.hpp"
+#include "Surface.hpp"
+#include "Player.hpp"
+#include "PhysicalDevice.hpp"
+#include "LogicalDevice.hpp"
+#include "SwapChain.hpp"
+#include "Queue.hpp"
+#include "GPUMultiThread.hpp"
+#include "vmaAllocator.hpp"
+#include "JobManager.hpp"
+
+#define MOX_UNLIKELY [[unlikely]]
+#define MOX_LIKELY [[likely]]
+#define MOX_NO_DISCARD [[nodiscard]]
+
+namespace mox{
+
+    using pPlayer = std::shared_ptr<Player>;
+    using pWindow = std::shared_ptr<Window>;
+    using pInstance = std::shared_ptr<Instance>;
+    using pSurface = std::shared_ptr<Surface>;
+    using pPhysicalDevice = std::shared_ptr<PhysicalDevice>;
+    using pLogicalDevice = std::shared_ptr<LogicalDevice>;
+    using pSwapchain = std::shared_ptr<Swapchain>;
+    using pMemoryAllocator = std::shared_ptr<MemoryAllocator>;
+
+    using QueueRecordTypeFunction = std::function<ErrorDataOutput<void>(VkCommandBuffer& , const uint32_t)>;
+
+    inline static uint32_t SCREEN_MIP_COUNT = 0;
+
+    class moxContext2 final{
+    private:
+
+        MOX_NO_DISCARD ErrorDataOutput<void> init(const uint32_t m , const uint32_t am){
+            try{
+                {
+                    StreamlineContext::CreateInfo info{};
+                    stream =  std::make_shared<StreamlineContext>(info);
+                }
+                user = std::make_shared<Player>();
+
+                mox::Window::WindowCreateInfo windowInfo{};
+                windowInfo.pUser = user.get();
+                windowInfo.key = Player::keyCallBack;
+                windowInfo.mouse = Player::mousePosCallBack;
+                windowInfo.mousePos = Player::mouseKeyCallBack;
+                window = std::make_shared<Window>(windowInfo);
+                glfwSetInputMode(window->window , GLFW_CURSOR , GLFW_CURSOR_NORMAL);
+                instance = std::make_shared<Instance>();
+                // the proxies of SL that need the instance
+                stream->loadInstanceProxies(instance->instance);
+
+                Surface::SurfaceCreateInfo surfaceInfo{};
+                surfaceInfo.instance = instance->instance;
+                surfaceInfo.window = window->window;
+
+                surface = std::make_shared<Surface>(surfaceInfo);
+
+                PhysicalDevice::PhysicalDeviceCreateInfo pDeviceInfo{};
+                pDeviceInfo.instance = instance->instance;
+                pDeviceInfo.surface = surface->surface;
+
+                physicalDevice = std::make_shared<PhysicalDevice>(pDeviceInfo);
+
+                LogicalDevice::logicalDeviceCreateInfo logicalInfo{};
+                logicalInfo.device = physicalDevice->device;
+                logicalInfo.surface = surface->surface;
+
+                logicalInfo.requiredForGraphics = 2;
+                logicalInfo.requiredForMultiThread = m + am;
+                // the queues that Streamline asked for are created together with the ones of the engine
+                logicalInfo.extraGraphicsQueues = stream->extraGraphicsQueues();
+                logicalInfo.extraComputeQueues = stream->extraComputeQueues();
+
+                logicalDevice = std::make_shared<LogicalDevice>(logicalInfo);
+
+                // right after the device : the proxies of the swapchain / present , and WHERE the queues of SL are ( the index of the first one in its family )
+                stream->loadDeviceProxies(logicalDevice->device);
+                {
+                    const auto slInfo = stream->setVulkanInfo(instance->instance , physicalDevice->device , logicalDevice->device ,
+                                                              logicalDevice->slGraphicsFamily , logicalDevice->slGraphicsIndex ,
+                                                              logicalDevice->slComputeFamily , logicalDevice->slComputeIndex);
+                    if(!slInfo.has_value()) return std::unexpected(slInfo.error());
+                }
+
+                {
+                    MemoryAllocator::CreateInfo info{};
+                    info.instance = instance->instance;
+                    info.logicalDevice = logicalDevice->device;
+                    info.pDevice = physicalDevice->device;
+
+                    allocator = std::make_shared<MemoryAllocator>(info);
+                }
+
+                // now the init for queues
+                {
+                    Queue::CreateInfo info{};
+                    info.countIndex = 0;
+                    info.device = logicalDevice->device;
+                    info.pDevice = physicalDevice->device;
+                    info.needsCmd = true;
+                    info.surface = surface->surface;
+
+                    graphicsQueue = std::make_shared<Queue>(info);
+
+                    info.countIndex = 1;
+
+                    VirtualShadowQueue = std::make_shared<QueueLane>(info);
+                }
+
+                {
+                    // we used only 0 and 1 , so offset is 2
+                    QueueManager::CreateInfo info{};
+                    info.device = logicalDevice->device;
+                    info.pDevice = physicalDevice->device;
+                    info.firstIndex = 2;
+                    info.threadsCount = m;
+                    info.surface = surface->surface;
+
+                    queueManager = std::make_shared<QueueManager>(info);
+                }
+
+                // later for queue multithread
+                {
+                    const uint32_t offset = m + 2;
+                }
+
+                Swapchain::SwapchainCreateInfo info{};
+                info.device = logicalDevice->device;
+                info.pDevice = physicalDevice->device;
+                info.surface = surface->surface;
+                info.window = window->window;
+
+                sc = std::make_shared<Swapchain>(info);
+
+                loadAllFunctions(instance->instance);
+
+                {
+                    uint32_t count;
+                    getSwapchainImagesKHR(logicalDevice->device , sc->sc , &count , nullptr);
+
+                    images.resize(count);
+                    views.resize(count);
+                    getSwapchainImagesKHR(logicalDevice->device , sc->sc , &count , images.data());
+                    uint32_t i = 0;
+                    for(auto& image : images){
+                        VkImageViewCreateInfo info{};
+                        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                        info.flags = 0;
+                        info.image = image;
+                        info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.format = sc->format.format;
+                        info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                        info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                        info.subresourceRange.baseArrayLayer = 0;
+                        info.subresourceRange.baseMipLevel = 0;
+                        info.subresourceRange.layerCount = 1;
+                        info.subresourceRange.levelCount = 1;
+
+                        const auto result = vkCreateImageView(logicalDevice->device , &info ,nullptr , &views[i]);
+                        if(result != VK_SUCCESS) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create image view for swap chain , error ID -> P{}" , static_cast<int32_t>(result)) });
+                        i++;
+                    }
+                }
+            }
+            catch(std::exception& e){throw;}
+
+            SCREEN_MIP_COUNT = (uint32_t)(std::floor((float)std::log2(std::max(sc->extent.width , sc->extent.height)))) + 1ul;
+
+            return {};
+        }
+
+        inline void loadAllFunctions(VkInstance instance){
+            loadFunction(instance, getFunctionName("PFN_vkCreateAccelerationStructureKHR"), createAccelerationStructureKHR);
+            loadFunction(instance, getFunctionName("PFN_vkGetAccelerationStructureBuildSizesKHR"), getAccelerationStructureBuildSizesKHR);
+            loadFunction(instance, getFunctionName("PFN_vkCmdBuildAccelerationStructuresKHR"), cmdBuildAccelerationStructuresKHR);
+            loadFunction(instance, getFunctionName("PFN_vkDestroyAccelerationStructureKHR"), destroyAccelerationStructureKHR);
+            loadFunction(instance, getFunctionName("PFN_vkGetAccelerationStructureDeviceAddressKHR"), getAccelerationStructureDeviceAddressKHR);
+
+            loadFunction(instance, getFunctionName("PFN_vkCreateRayTracingPipelinesKHR"), createRayTracingPipelinesKHR);
+            loadFunction(instance, getFunctionName("PFN_vkGetRayTracingShaderGroupHandlesKHR"), getRayTracingShaderGroupHandlesKHR);
+            loadFunction(instance, getFunctionName("PFN_vkCmdTraceRaysKHR"), cmdTraceRaysKHR);
+
+            loadFunction(instance, getFunctionName("PFN_vkCreateShadersEXT"), createShaderEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetVertexInputEXT"), cmdSetVertexInputEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetPolygonModeEXT"), cmdSetPolygonModeEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetRasterizationSamplesEXT"), cmdSetRasterizationSamplesEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetSampleMaskEXT"), cmdSetSampleMaskEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetAlphaToCoverageEnableEXT"), cmdSetAlphaToCoverageEnableEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdBindShadersEXT"), cmdBindShadersEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
+
+            loadFunction(instance, getFunctionName("PFN_vkGetShaderBinaryDataEXT"), getShaderBinaryDataEXT);
+            loadFunction(instance, getFunctionName("PFN_vkDestroyShaderEXT"), destroyShaderEXT);
+
+            loadFunction(instance, getFunctionName("PFN_vkCmdPushDescriptorSetKHR"), cmdPushDescriptorSetKHR);
+
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetColorBlendEnableEXT"), cmdSetColorBlendEnableEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetColorWriteMaskEXT"), cmdSetColorWriteMaskEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetColorBlendEquationEXT"), cmdSetColorBlendEquationEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetFragmentShadingRateKHR"), cmdSetFragmentShadingRateKHR);
+
+            loadFunction(instance, getFunctionName("PFN_vkGetDescriptorSetLayoutBindingOffsetEXT"), getDescriptorSetLayoutBindingOffsetEXT);
+            loadFunction(instance, getFunctionName("PFN_vkGetDescriptorSetLayoutSizeEXT"), getDescriptorSetLayoutSizeEXT);
+            loadFunction(instance, getFunctionName("PFN_vkGetDescriptorEXT"), getDescriptorEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdBindDescriptorBuffersEXT"), cmdBindDescriptorBuffersEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdSetDescriptorBufferOffsetsEXT"), cmdSetDescriptorBufferOffsetsEXT);
+
+            loadFunction(instance, getFunctionName("PFN_vkCmdBeginConditionalRenderingEXT"), cmdBeginConditionalRenderingEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdEndConditionalRenderingEXT"), cmdEndConditionalRenderingEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
+
+            loadFunction(instance , getFunctionName("PFN_vkCmdConvertCooperativeVectorMatrixNV") , cmdConvertCooperativeVectorMatrixNV);
+        }
+
+        void processCopy(moxContext2&& input) noexcept{
+
+        }
+
+        void processDelete() noexcept{
+            for(auto& view : views){
+                vkDestroyImageView(logicalDevice->device , view , nullptr);
+            }
+
+            images.clear();
+            views.clear();
+            sc = nullptr;
+            queueManager = nullptr;
+            graphicsQueue = nullptr;
+            allocator = nullptr;
+            VirtualShadowQueue = nullptr;
+            stream = nullptr;
+            logicalDevice = nullptr;
+            physicalDevice=  nullptr;
+            user = nullptr;
+            surface = nullptr;
+            instance = nullptr;
+            window = nullptr;
+        }
+
+    public:
+
+        struct CreateInfo{
+            uint32_t asyncMultiThreadQueueCount;
+            uint32_t multithreadQueueCount;
+        };
+
+        explicit moxContext2(const CreateInfo &info){
+            const auto result = init(info.multithreadQueueCount , info.asyncMultiThreadQueueCount);
+            if(!result.has_value()){
+                engineLogger(result);
+                THROW_MESSAGE;
+            }
+        }
+
+        SetTypicalOperators(moxContext2)
+        ~moxContext2() noexcept{
+            processDelete();
+        }
+        pStreamlineContext stream{nullptr};
+        pPlayer user = nullptr;
+        pWindow window = nullptr;
+        pInstance instance = nullptr;
+        pSurface surface = nullptr;
+
+        pPhysicalDevice physicalDevice = nullptr;
+        pLogicalDevice logicalDevice = nullptr;
+
+        pSwapchain sc = nullptr;
+
+        pQueueManager queueManager = nullptr;
+        pQueue graphicsQueue = nullptr;
+        pQueueLane VirtualShadowQueue = nullptr;
+
+
+        pMemoryAllocator allocator{nullptr};
+
+        std::vector<VkImage> images{};
+        std::vector<VkImageView> views{};
+
+        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> processQueueLoop(const QueueRecordTypeFunction &function) noexcept{
+
+            if(!function) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process Queue loop , since the function is nullptr"});
+
+            VkQueue queue = graphicsQueue->queue;
+            uint32_t& id = sc->currentImage;
+            // Streamline : the token of this frame ( the index of the frame is the same in all the calls ) , Reflex sleeps , the markers of the simulation
+
+            vkWaitForFences(logicalDevice->device , 1 , &sc->fences[sc->currentImage] , VK_TRUE , UINT64_MAX);
+            vkResetFences(logicalDevice->device , 1 , &sc->fences[id]);
+            uint32_t nextId;
+            acquireNextImageKHR(logicalDevice->device , sc->sc , UINT64_MAX , sc->waitSemaphore[id] , nullptr , &nextId);
+            VkCommandBuffer& cmd = graphicsQueue->cmds[nextId];
+            vkResetCommandBuffer(cmd , 0);
+            stream->marker(sl::PCLMarker::eRenderSubmitStart);
+            const auto result = function(cmd , nextId);
+            if(!result.has_value()) return result;
+
+            VkSemaphore& wait = sc->waitSemaphore[id];
+            VkSemaphore& signal = sc->signalSemaphore[nextId];
+            {   
+
+                VkSemaphoreSubmitInfo wait{};
+                wait.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                wait.semaphore = sc->waitSemaphore[id];
+                wait.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkSemaphoreSubmitInfo signal{};
+                signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                // one per swapchain image , the presentation engine holds it until the image is shown again
+                signal.semaphore = sc->signalSemaphore[nextId];
+                signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkCommandBufferSubmitInfo command{};
+                command.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                command.commandBuffer = cmd;
+
+                VkSubmitInfo2 submit{};
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = &wait;
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &command;
+                submit.signalSemaphoreInfoCount = 1;
+                submit.pSignalSemaphoreInfos = &signal;
+
+                const VkResult result = vkQueueSubmit2(queue , 1 , &submit , sc->fences[id]);
+                stream->marker(sl::PCLMarker::eRenderSubmitEnd);
+                if(result != VK_SUCCESS){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to draw the frame , failed to submit , error ID -> {}" , static_cast<int32_t>(result))});
+                }
+            }
+
+            {
+                VkPresentInfoKHR info{};
+                info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                info.pWaitSemaphores = &signal;
+                info.swapchainCount = 1;
+                info.pSwapchains = &sc->sc;
+                info.pNext = nullptr;
+                info.waitSemaphoreCount= 1;
+                info.pImageIndices = &nextId;
+
+                // the present markers are the ones that DLSS-G NEEDS : their frame index has to be the one of the constants of the frame
+                stream->marker(sl::PCLMarker::ePresentStart);
+                const VkResult result = queuePresentKHR(queue , &info);
+                stream->marker(sl::PCLMarker::ePresentEnd);
+                if(result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to draw the frame , failed to present , error ID -> {}" , static_cast<int32_t>(result))});
+                }
+            }
+            id = (id + 1 ) % sc->frames_in_flight;
+            sc->frameIndex++;
+            return {};
+        }
+
+
+        // new feature 
+        // now we added a single use function that easily deletes all the context->queueManager->....
+        MOX_NO_DISCARD ErrorDataOutput<void> executeCommand(cmdFunctionType& function ,const  VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept
+        {
+            queueManager->Begin();
+            queueManager->recordCmd(function , stage);
+            return queueManager->End();
+        }
+    };
+
+    inline uint32_t findMemoryIndex(moxContext2* base , uint32_t index , VkMemoryPropertyFlags flags){
+        VkPhysicalDeviceMemoryProperties properties{};
+        vkGetPhysicalDeviceMemoryProperties(base->physicalDevice->device , &properties);
+        for(uint8_t i = 0 ; i < properties.memoryTypeCount ;  i++){
+            if ( index & ( 1 << i) && (properties.memoryTypes[i].propertyFlags & flags) == flags) return i;
+        }
+
+        throw std::runtime_error("couldnt find the memory index for these flags");
+    }
+
+    using pMoxContext2 = std::shared_ptr<moxContext2>;
+
+    inline uint32_t alignUp(uint32_t size , uint32_t alignment) noexcept {
+        return (alignment == 0) ? size : ((size + alignment - 1) / alignment) * alignment;
+    }
+
+    enum class VulkanRequirements : uint32_t{
+        Instance = 0x01,
+        Queues = 0x02,
+        QueueManager = 0x03,
+        LogicalDevice = 0x04,
+        PhysicalDevice = 0x05,
+        Swapchain = 0x06
+    };
+
+
+    inline static constexpr uint32_t VkReqTypeInstance = static_cast<uint32_t>(VulkanRequirements::Instance);
+    inline static constexpr uint32_t VkReqTypeQueues = static_cast<uint32_t>(VulkanRequirements::Queues);
+    inline static constexpr uint32_t VkReqTypeQueueManager = static_cast<uint32_t>(VulkanRequirements::QueueManager);
+    inline static constexpr uint32_t VkReqTypeLogicalDevice = static_cast<uint32_t>(VulkanRequirements::LogicalDevice);
+    inline static constexpr uint32_t VkReqTypePhysicalDevice = static_cast<uint32_t>(VulkanRequirements::PhysicalDevice);
+    inline static constexpr uint32_t VkReqTypeSwapchain = static_cast<uint32_t>(VulkanRequirements::Swapchain);
+
+
+    [[nodiscard]] [[gnu::hot]] inline ErrorDataOutput<void> checkRequirements(const uint32_t reqs , moxContext2* context) noexcept{
+
+        if(!context){
+            return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the context is nullptr"});
+        }
+
+        if((reqs & VkReqTypeInstance) == VkReqTypeInstance){
+            if(!context->instance) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the instance is nullptr"});
+        }
+
+        if((reqs & VkReqTypeQueues) == VkReqTypeQueues){
+            if(!context->graphicsQueue) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the queues is nullptr"});
+        }
+
+        if((reqs &VkReqTypeQueueManager) ==VkReqTypeQueueManager){
+            if(!context->queueManager) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the queue manager is nullptr"});
+        }
+
+        if((reqs & VkReqTypeLogicalDevice) == VkReqTypeLogicalDevice){
+            if(!context->logicalDevice) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the logical device is nullptr"});
+        }
+
+        if((reqs & VkReqTypePhysicalDevice) == VkReqTypePhysicalDevice){
+            if(!context->physicalDevice) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the physical device is nullptr"});
+        }
+
+        if((reqs & VkReqTypeSwapchain) == VkReqTypeSwapchain){
+            if(!context->sc) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the swapchain is nullptr"});
+        }
+
+        return {};
+    }
+
+
+    template<uint32_t Images , uint32_t Buffers , uint32_t Memories>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar , VkBufferMemoryBarrier2* bufBar , VkMemoryBarrier2* memBar ){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = Buffers;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = Memories;
+        info.pMemoryBarriers = memBar;
+        info.pBufferMemoryBarriers = bufBar;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    template<uint32_t Buffers , uint32_t Images>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar , VkBufferMemoryBarrier2* bufBar){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = Buffers;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = bufBar;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    template<uint32_t Images>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = 0;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = nullptr;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    template<uint32_t barriers>
+    VkDependencyInfo TypicalDependency(VkBufferMemoryBarrier2* buff){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = barriers;
+        info.imageMemoryBarrierCount = 0;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = buff;
+        info.pImageMemoryBarriers = nullptr;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    inline uint32_t align(uint32_t size, const uint32_t T) noexcept
+    {
+        return (size + T - 1) & ~(T - 1);
+    }
+}
+
+#endif

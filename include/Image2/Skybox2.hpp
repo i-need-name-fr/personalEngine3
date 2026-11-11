@@ -1,0 +1,416 @@
+#pragma once
+
+#include "ImageBase2.hpp"
+#include "../Buffer2/GeneralBuffer.hpp"
+namespace mox{
+namespace Image{
+
+    class Skybox2;
+    using pSkybox2 = std::shared_ptr<Skybox2>;
+
+    // =============================== INFO ===============================
+    // Skybox2
+    // CHANGES:
+    // actually nothing has really changed , the only difference is that now it has personal translate
+    // and ImageBase2 support
+    // but its the same as always
+    // =============================== END ===============================
+
+    class Skybox2 final : public ImageBase2{
+    public:
+
+        Skybox2() = delete;
+        Skybox2(Skybox2& input) = delete;
+        Skybox2& operator=(Skybox2& input) = delete;
+        Skybox2& operator=(Skybox2&& input) noexcept{
+            if(this == &input) return *this;
+            // the view and the image that this object held would leak
+            if(view && device) vkDestroyImageView(device , view , nullptr);
+            view = nullptr;
+            if(storageView && device) vkDestroyImageView(device , storageView , nullptr);
+            storageView = nullptr;
+            cleanImage();
+            processCopy(std::move(input));
+            view = std::exchange(input.view , nullptr);
+            storageView = std::exchange(input.storageView , nullptr);
+            // the barrier of the next translate starts from where the image is now
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
+            return *this;
+        }
+        Skybox2(Skybox2&& input) noexcept : ImageBase2(std::move(input)){
+            view = std::exchange(input.view , nullptr);
+            storageView = std::exchange(input.storageView , nullptr);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
+        }
+
+        ~Skybox2(){
+            if(view && device) vkDestroyImageView(device , view , nullptr);
+            view = nullptr;
+            if(storageView && device) vkDestroyImageView(device , storageView , nullptr);
+            storageView = nullptr;
+        }
+
+        struct CreateInfo{
+
+            moxContext2* context;
+
+            std::string path{};
+            VkImageUsageFlags usage;
+            // this is for nonTexture
+            VkImageLayout finalLayout;
+            VkExtent2D extent;
+            // if its a texture
+            uint8_t isTexture = false;
+            
+            uint32_t resolution;
+        };
+
+        Skybox2(const CreateInfo &info) : ImageBase2(info.context){
+            {
+                const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypeQueueManager , info.context);
+                if(!result.has_value()){
+                    engineLogger(result.error());
+                    THROW_MESSAGE;
+                }
+            }
+            device = context->logicalDevice->device;
+
+            const auto result = createSkybox(info);
+            if(!result.has_value()){
+                engineLogger(&result.error());
+                // the destructor of Skybox never runs when the constructor throws
+                if(view) vkDestroyImageView(device , view , nullptr);
+                view = nullptr;
+                if(storageView) vkDestroyImageView(device , storageView , nullptr);
+                storageView = nullptr;
+                THROW_MESSAGE;
+            }
+        }
+
+        VkImageView view = nullptr;
+
+        // the same image as a 2D array of 6 layers ( the faces ) : the view for the shaders that WRITE the cube . HLSL has no RWTextureCube ,
+        // and a CUBE view does not match the RWTexture2DArray of the shader ( VUID-vkCmdDispatch-viewType-07752 ) . the cube is read through "view" .
+        // it exists only for the skyboxes that are not textures and have VK_IMAGE_USAGE_STORAGE_BIT
+        VkImageView storageView = nullptr;
+
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = currentAccess;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = 6;
+            barrier.subresourceRange.levelCount = 1;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+        // translate from undefined
+
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = 6;
+            barrier.subresourceRange.levelCount = 1;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+
+        const VkAccessFlags2 acquireImageAccess() const noexcept{
+            return currentAccess;
+        }
+
+        const VkPipelineStageFlags2 acquireImageStage() const noexcept{
+            return currentStage;
+        }
+
+    private:
+    
+        VkAccessFlags2 currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
+
+        [[nodiscard]] ErrorDataOutput<void> createSkybox(const CreateInfo &data){
+
+            if(data.isTexture){
+                const auto result = processTextureSkybox(data);
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }else{
+                const auto result = processNonTextureSkybox(data);
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }
+
+            return {};
+        }
+
+        // the source is a horizontal cross (4 x 3 faces) , imageWidth is the width of the whole cross in pixels
+        void copySkybox( VkCommandBuffer &cmd , VkImage &dst , VkBuffer &src ,const  uint32_t &faceSize , const uint32_t imageWidth){
+            struct FaceOffset { uint32_t col, row; };
+            const FaceOffset faceLayout[6] = {
+                {2, 1},   // +X (right)
+                {0, 1},   // -X (left)
+                {1, 0},   // +Y (top)
+                {1, 2},   // -Y (bottom)
+                {1, 1},   // +Z (front)
+                {3, 1},   // -Z (back)
+            };
+
+            for(uint32_t face = 0; face < 6; face++){
+                VkBufferImageCopy region{};
+                // rows of the source are as wide as the whole cross
+                region.bufferRowLength = imageWidth;
+                region.bufferImageHeight = 0;
+                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.mipLevel = 0;
+                region.imageSubresource.baseArrayLayer = face;
+                region.imageSubresource.layerCount = 1;
+                region.imageOffset = {0 , 0 , 0};
+                region.imageExtent = {faceSize, faceSize, 1};
+
+                const VkDeviceSize srcX = static_cast<VkDeviceSize>(faceLayout[face].col) * faceSize;
+                const VkDeviceSize srcY = static_cast<VkDeviceSize>(faceLayout[face].row) * faceSize;
+                // offset in bytes to the first texel of the face
+                region.bufferOffset = (srcY * imageWidth + srcX) * 4;
+
+                vkCmdCopyBufferToImage(cmd, src, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+            }
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> processTextureSkybox(const CreateInfo &data) noexcept{
+
+            if(data.path.empty()){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the paths are nullptr"});
+            }
+
+            int width , height;
+            unsigned char* text = stbi_load(data.path.c_str() , &width , &height , 0 , 4);
+            if(!text){
+                stbi_image_free(text);
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create the skybox -> {}" , data.path)});
+            }
+
+            
+            std::vector<uint8_t> buffer(text , text + ((width * height) * 4));
+            stbi_image_free(text);
+
+            // a horizontal cross has to be 4 faces wide and 3 faces high
+            if(static_cast<uint32_t>(width) != data.resolution * 4 || static_cast<uint32_t>(height) != data.resolution * 3){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create the skybox -> {} , the image is {}x{} , but a cross with resolution {} has to be {}x{}" , data.path , width , height , data.resolution , data.resolution * 4 , data.resolution * 3)});
+            }
+
+            {
+                ImageInfo info{};
+                info.imageFlags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+                info.imageType = VK_IMAGE_TYPE_2D;
+                // the picture is sRGB encoded : with the SRGB format the sampler returns linear values , the lighting works in linear
+                // ( it was UNORM : the sky went through the gamma of HDR_final a second time and came out washed out )
+                info.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
+                info.imageUsage = data.usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                info.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+                info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                info.context = context;
+                info.extent = {data.resolution, data.resolution};
+                info.layerCount = 6;
+                info.mipMapCount = 1;
+
+                {
+                    const auto result = createImage(info);
+                    if(!result.has_value()){
+                        return std::unexpected(result.error());
+                    }
+                }
+
+                {
+                    const auto result = createImageView(view , 6 , 0 , 1 , 0);
+                    if(!result.has_value()){
+                        return std::unexpected(result.error());
+                    }
+                }
+            }
+            Buffer::GeneralBuffer2< Buffer::BufferType::Host, true>::CreateInfo info{};
+            info.context = context;
+            info.size = buffer.size();
+            info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+            try{
+                Buffer::GeneralBuffer2<Buffer::BufferType::Host , true> staging(info, Buffer::translateToSpan(buffer));
+
+                cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
+                    if(!cmd) return;
+                    auto barrier = translateImageUndefined(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+
+                    VkDependencyInfo dep{};
+                    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    dep.bufferMemoryBarrierCount = 0;
+                    dep.imageMemoryBarrierCount = 1;
+                    dep.pMemoryBarriers = nullptr;
+                    dep.pBufferMemoryBarriers = nullptr;
+                    dep.pImageMemoryBarriers = &barrier;
+                    dep.memoryBarrierCount = 0;
+                    dep.pNext = nullptr;
+                    dep.dependencyFlags = 0;
+
+                    vkCmdPipelineBarrier2(cmd , &dep);
+
+                    copySkybox(cmd , image , staging.buffer , data.resolution , static_cast<uint32_t>(width));
+
+                    barrier = translateImage(VK_ACCESS_2_SHADER_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
+                    dep.pImageMemoryBarriers = &barrier;
+                    vkCmdPipelineBarrier2(cmd , &dep);
+                };
+
+                context->queueManager->Begin();
+
+                context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+                const auto result = context->queueManager->End();
+
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+
+            }
+            catch(std::exception &e){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "probably failed to create the buffer , since thats the only reason in processTextureSkybox"});
+            }
+
+
+            return {};
+        }
+
+        // the 2D array view of the 6 faces : createImageView of the base class takes the view type of the image ( CUBE )
+        [[nodiscard]] ErrorDataOutput<void> createStorageView() noexcept{
+            VkImageViewCreateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            info.pNext = nullptr;
+            info.image = this->image;
+            info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            info.format = this->format;
+            info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.subresourceRange.aspectMask = generalImageData.aspect;
+            info.subresourceRange.baseArrayLayer = 0;
+            info.subresourceRange.baseMipLevel = 0;
+            info.subresourceRange.layerCount = 6;
+            info.subresourceRange.levelCount = 1;
+
+            const auto result = vkCreateImageView(device , &info , nullptr , &storageView);
+            if(result != VK_SUCCESS){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create the storage view of the skybox , error ID -> {}" , static_cast<int32_t>(result))});
+            }
+            return {};
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> processNonTextureSkybox(const CreateInfo &data) noexcept{
+
+            ImageInfo info{};
+            info.imageFlags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+            info.imageType = VK_IMAGE_TYPE_2D;
+            // IBL writes linear irradiance into it , it can be above 1 and it is dark for a night sky : 8 bit UNORM clamped it and banded it
+            info.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+            info.imageUsage = data.usage;
+            info.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+            info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+            info.context = context;
+            info.extent = {data.resolution, data.resolution};
+            info.layerCount = 6;
+            info.mipMapCount = 1;
+
+            {
+                const auto result = createImage(info);
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }
+
+            {
+                const auto result = createImageView(view , 6 , 0 , 1 , 0);
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }
+
+            if(data.usage & VK_IMAGE_USAGE_STORAGE_BIT){
+                const auto result = createStorageView();
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }
+
+            // now we have to translate the cube
+            cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
+                if(!cmd) return;
+                auto barrier = translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
+                VkDependencyInfo dep{};
+                dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dep.bufferMemoryBarrierCount = 0;
+                dep.imageMemoryBarrierCount = 1;
+                dep.pMemoryBarriers = nullptr;
+                dep.pBufferMemoryBarriers = nullptr;
+                dep.pImageMemoryBarriers = &barrier;
+                dep.memoryBarrierCount = 0;
+                dep.pNext = nullptr;
+                dep.dependencyFlags = 0;
+
+                vkCmdPipelineBarrier2(cmd , &dep);
+            };
+
+            context->queueManager->Begin();
+
+            context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+            const auto result = context->queueManager->End();
+
+            if(!result.has_value()){
+                return std::unexpected(result.error());
+            }
+
+            return {};
+        }
+
+    };
+
+}
+}

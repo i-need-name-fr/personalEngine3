@@ -1,0 +1,98 @@
+#pragma once
+
+#include "../vulkanContext/moxContext2.hpp"
+#include "../Buffer2/GeneralBuffer.hpp"
+namespace mox{
+
+    class AccelerationStructure{
+    public:
+
+        AccelerationStructure() = delete;
+        AccelerationStructure(AccelerationStructure& input) = delete;
+        AccelerationStructure(const AccelerationStructure& input) = delete;
+        AccelerationStructure(AccelerationStructure&& input) noexcept{
+            processCopy(std::move(input));
+        }
+
+        AccelerationStructure& operator=(AccelerationStructure& input) = delete;
+        AccelerationStructure& operator=(const AccelerationStructure& input) = delete;
+        AccelerationStructure& operator=(AccelerationStructure&& input) noexcept{
+
+            processCopy(std::move(input));
+            return *this;
+        }
+
+        AccelerationStructure(moxContext2* context){
+            // these two used to build the error and then fall through - a null context was
+            // dereferenced on the very next line
+            if(!context){
+                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create Acceleration structure , since the context is nullptr"};
+                engineLogger(&error);
+                THROW_MESSAGE;
+            }
+
+            const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypeQueueManager | VkReqTypePhysicalDevice , context);
+            if(!result.has_value()){
+                engineLogger(result.error());
+                THROW_MESSAGE;
+            }
+            this->device = context->logicalDevice->device;
+            if(!properties)
+            {
+                VkPhysicalDeviceAccelerationStructurePropertiesKHR prop{};
+                prop.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+
+                VkPhysicalDeviceProperties2 data{};
+                data.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                data.pNext = &prop;
+                vkGetPhysicalDeviceProperties2(context->physicalDevice->device , &data);
+                properties = prop;
+            }
+        }
+
+        virtual ~AccelerationStructure() noexcept{
+            processDelete();
+        }
+
+        VkAccelerationStructureKHR AS = VK_NULL_HANDLE;
+        VkDeviceAddress pAS = 0;
+        Buffer::pGeneralBuffer2<Buffer::BufferType::Device , false> build = nullptr;;
+        Buffer::pGeneralBuffer2<Buffer::BufferType::Device , false> scratch = nullptr;
+
+    protected:
+
+        VkDevice device = nullptr;
+        inline static std::optional<VkPhysicalDeviceAccelerationStructurePropertiesKHR> properties{};
+
+        // the address of the scratch buffer rounded UP to minAccelerationStructureScratchOffsetAlignment ( the buffer has that many spare bytes , see the size of it ) .
+        // 64 bit on purpose : align() of moxContext2.hpp takes uint32_t , and it would cut the address
+        VkDeviceAddress alignedScratchAddress() const noexcept{
+            const VkDeviceAddress alignment = properties.value().minAccelerationStructureScratchOffsetAlignment;
+            return (scratch->pBuffer + alignment - 1) & ~(alignment - 1);
+        }
+
+        void processCopy(AccelerationStructure&& input) noexcept {
+            if(input.AS == this->AS) return ;
+            processDelete();
+            device = std::exchange(input.device , nullptr);
+            AS = std::exchange(input.AS , nullptr);
+            pAS = std::exchange(input.pAS , 0);
+            build = std::move(input.build);
+            scratch = std::move(input.scratch);
+        }   
+
+        void processDelete() noexcept {
+
+            if(device){
+                if(AS) destroyAccelerationStructureKHR(device , AS , nullptr);
+            }
+
+            device = nullptr;
+            AS = nullptr;
+            pAS = 0;
+            build = nullptr;
+            scratch = nullptr;
+        }
+    };
+
+}
