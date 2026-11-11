@@ -46,6 +46,7 @@ namespace mox
     struct FileData
     {
         std::vector<SetData> sets{};
+        uint8_t containsPingPong{};
     };
 
     class DescriptorFile final
@@ -53,7 +54,10 @@ namespace mox
     public:
         inline static const std::string _moxGeneralSet = "GENERAL";
 
-        MOX
+        MOX_NO_DISCARD inline static ErrorDataOutput<mox::FileData> AnalyzeFile(const std::filesystem::path &path) noexcept
+        {
+            return _implAnalyzeFile(path);
+        }
 
     private:
 
@@ -138,11 +142,10 @@ namespace mox
             }
 
             mox::FileData data{};
-
+            data.containsPingPong = false;
             std::ifstream file(path.string() , std::ios::in);
             MOX_UNLIKELY if(!file.is_open()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("failed to process File | {} | , due to fail at opening the file" , path.string())});
 
-            // the format is STRICT : every line is empty , or [[SET_DATA]] , or [[ATTACHMENT_DATA]] , exactly as in task.txt , anything else is an error
             std::string line{};
             uint32_t lineNumber = 0;
             while(std::getline(file , line))
@@ -229,6 +232,11 @@ namespace mox
                     attachment.source = source;
                     attachment.type = dsTypeResult.value();
                     set.attachments.push_back(std::move(attachment));
+
+                    if(pingPongRequired)
+                    {
+                        data.containsPingPong = true;
+                    }
                 }
                 else
                 {
@@ -237,12 +245,6 @@ namespace mox
             }
 
             return data;
-        }
-
-    public:
-        MOX_NO_DISCARD inline static ErrorDataOutput<mox::FileData> Read(const std::filesystem::path& path) noexcept
-        {
-            return _implAnalyzeFile(path);
         }
     };
 }

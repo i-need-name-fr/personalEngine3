@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../vulkanContext/moxContext2.hpp"
+#include "../MoxFileReader/FileReader.hpp"
 
 namespace mox{
 
