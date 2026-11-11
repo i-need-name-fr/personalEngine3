@@ -2,6 +2,7 @@
 
 #include "../vulkanContext/moxContext2.hpp"
 #include <filesystem>
+#include <unordered_map>
 #include <fstream>
 #include <cstdio>
 #include <format>
@@ -40,12 +41,12 @@ namespace mox
         std::string source{moxUndefinedBehavior};
         uint32_t index{0};
         // every attachment belongs to the set which is written above it in the file
-        std::vector<DescriptorAttachment> attachments{};
+        std::unordered_map<std::string , DescriptorAttachment> attachments{};
     };
 
     struct FileData
     {
-        std::vector<SetData> sets{};
+        std::unordered_map<std::string , SetData> sets{};
         uint8_t containsPingPong{};
     };
 
@@ -172,7 +173,13 @@ namespace mox
                     mox::SetData set{};
                     set.index = index;
                     set.source = name;
-                    data.sets.push_back(std::move(set));
+                    set.attachments = {};
+                    if(data.sets.contains(set.source))
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to analyze the file , since Set has been declared 2 times , file -> {}" , path.string())});
+                    }
+
+                    data.sets.insert(std::pair<std::string , mox::SetData>(set.source , set));
                 }
                 else if(line.starts_with("[[ATTACHMENT_DATA]]"))
                 {
@@ -181,16 +188,16 @@ namespace mox
                         return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : [[ATTACHMENT_DATA]] before any [[SET_DATA]]" , path.string() , lineNumber)});
                     }
 
-                    char source[64]{};
-                    char name[64]{};
-                    char type[32]{};
-                    char action[16]{};
+                    char source[128]{};
+                    char name[128]{};
+                    char type[128]{};
+                    char action[128]{};
                     uint32_t pingPongRequired = 0;
                     uint32_t pingPongIndex = 0;
                     uint32_t binding = 0;
                     uint32_t count = 0;
 
-                    const int n = std::sscanf(l , "[[ATTACHMENT_DATA]] DESCRIPTOR_SOURCE: %63s NAME: %63s DESCRIPTOR_TYPE: %31s PING_PONG_REQUIRED: %u PING_PONG_CURRENT: %u ACTION: %15s BINDING: %u COUNT: %u%n" ,
+                    const int n = std::sscanf(l , "[[ATTACHMENT_DATA]] DESCRIPTOR_SOURCE: %127s NAME: %127s DESCRIPTOR_TYPE: %127s PING_PONG_REQUIRED: %u PING_PONG_CURRENT: %u ACTION: %127s BINDING: %u COUNT: %u%n" ,
                                             source , name , type , &pingPongRequired , &pingPongIndex , action , &binding , &count , &consumed);
                     if(n != 8 || l[consumed] != '\0')
                     {
@@ -213,10 +220,23 @@ namespace mox
                     const auto accessResult = _implAnalyzeAction(action);
                     if(!accessResult.has_value()) return std::unexpected(accessResult.error());
 
-                    mox::SetData& set = data.sets.back();
+                    // DESCRIPTOR_SOURCE is the name of the set the attachment belongs to , and the set has to be declared above
+                    const auto setIt = data.sets.find(source);
+                    if(setIt == data.sets.end())
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("File | {} | line {} : the attachment links to the Set {} which is not declared above it" , path.string() , lineNumber , source)});
+                    }
+
+                    mox::SetData& set = setIt->second;
+
+                    if(set.attachments.contains(name))
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : attachment {} is already declared in the set {}" , path.string() , lineNumber , name , set.source)});
+                    }
+
                     for(const auto& other : set.attachments)
                     {
-                        if(other.binding == binding)
+                        if(other.second.binding == binding)
                         {
                             return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : binding {} is already used in the set {}" , path.string() , lineNumber , binding , set.source)});
                         }
@@ -231,7 +251,7 @@ namespace mox
                     attachment.pingPongSystem = pingPongRequired;
                     attachment.source = source;
                     attachment.type = dsTypeResult.value();
-                    set.attachments.push_back(std::move(attachment));
+                    set.attachments.emplace(attachment.name , std::move(attachment));
 
                     if(pingPongRequired)
                     {
@@ -247,4 +267,5 @@ namespace mox
             return data;
         }
     };
+
 }

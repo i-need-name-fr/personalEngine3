@@ -56,6 +56,16 @@ namespace mox{
             }
         }
 
+        MOX_NO_DISCARD inline static ErrorDataOutput<std::shared_ptr<DescriptorLayout>> CreateDescriptorLayoutFromFile(const DescriptorLayout::CreateInfo &info , const std::filesystem::path& path) noexcept
+        {
+            return _implCreateDescriptorLayoutFromFile(path , info);
+        }
+
+        MOX_NO_DISCARD inline static ErrorDataOutput<std::shared_ptr<DescriptorLayout>> CreateDescriptorLayoutFromFile( const DescriptorLayout::CreateInfo &info ,  mox::FileData& file) noexcept
+        {
+            return _implCreateDescriptorLayoutFromFile(file , info);
+        }
+
         ~DescriptorLayout(){
             processDelete();
         }
@@ -107,6 +117,85 @@ namespace mox{
             if(device && layout) vkDestroyDescriptorSetLayout(device , layout , nullptr);
             device = nullptr;
             layout = nullptr;
+        }
+
+        // CREATES ONLY GENERAL SET , NOT PERSONAL SET , LIKE SOURCE BUFFERS, ONLY LAYOUT FOR GENERAL!!!!
+        MOX_NO_DISCARD inline static ErrorDataOutput<std::shared_ptr<DescriptorLayout>> _implCreateDescriptorLayoutFromFile(const std::filesystem::path& path , const DescriptorLayout::CreateInfo &addData) noexcept
+        {
+            try{
+
+                const auto analyzedResult = DescriptorFile::AnalyzeFile(path);
+                // now when we got the data , we need to check if there is a GENERAL
+                if(!analyzedResult.has_value()) return std::unexpected(analyzedResult.error());
+                auto data = analyzedResult.value();
+
+ 
+                if(!data.sets.contains(DescriptorFile::_moxGeneralSet))
+                {
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor set layout , since it doesnt have GENERAL set, file -> {}" , path.string())};
+                    engineLogger(error);
+                    return nullptr;
+                }
+
+                std::vector<DescriptorLayoutData> layoutDatas{};
+
+                // now we create DescriptorDataLayout per each attachments if its from GENERAL
+                for(const auto& d : data.sets[DescriptorFile::_moxGeneralSet].attachments )
+                {
+                    DescriptorLayoutData l{};
+                    l.count = d.second.count;
+                    l.type = d.second.type;
+                    layoutDatas.push_back(l);
+                }
+
+                DescriptorLayout::CreateInfo info{};
+                info.context = addData.context;
+                info.data = layoutDatas;
+                info.flags = addData.flags;
+                info.pNext = nullptr;
+                info.stage = addData.stage;
+
+                return std::make_shared<DescriptorLayout>(info);
+            }
+            catch(std::exception &e)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create Descriptor set from file -> {}" , path.string())});
+            }
+        }
+
+        MOX_NO_DISCARD inline static ErrorDataOutput<std::shared_ptr<DescriptorLayout>> _implCreateDescriptorLayoutFromFile(mox::FileData& data , const DescriptorLayout::CreateInfo &addData) noexcept
+        {
+            try{
+
+                if(!data.sets.contains(DescriptorFile::_moxGeneralSet))
+                {
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create Descriptor layout from fileData structure"});
+                }
+
+                std::vector<DescriptorLayoutData> layoutDatas{};
+
+                // now we create DescriptorDataLayout per each attachments if its from GENERAL
+                for(const auto& d : data.sets[DescriptorFile::_moxGeneralSet].attachments )
+                {
+                    DescriptorLayoutData l{};
+                    l.count = d.second.count;
+                    l.type = d.second.type;
+                    layoutDatas.push_back(l);
+                }
+
+                DescriptorLayout::CreateInfo info{};
+                info.context = addData.context;
+                info.data = layoutDatas;
+                info.flags = addData.flags;
+                info.pNext = nullptr;
+                info.stage = addData.stage;
+
+                return std::make_shared<DescriptorLayout>(info);
+            }
+            catch(std::exception &e)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create Descriptor layout from fileData structure"});
+            }
         }
     };
 
