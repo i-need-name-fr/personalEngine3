@@ -48,6 +48,7 @@ namespace mox
     {
         std::unordered_map<std::string , SetData> sets{};
         uint8_t containsPingPong{};
+        uint32_t totalBindingUsage{};
     };
 
     class DescriptorFile final
@@ -58,6 +59,14 @@ namespace mox
         MOX_NO_DISCARD inline static ErrorDataOutput<mox::FileData> AnalyzeFile(const std::filesystem::path &path) noexcept
         {
             return _implAnalyzeFile(path);
+        }
+
+        inline static VkAccessFlags2 TranslateToAccess(DescriptorAccess const &access) noexcept
+        {
+            if(access == moxDescriptorAccessWrite) return VK_ACCESS_2_SHADER_WRITE_BIT;
+            if(access == moxDescriptorAccessRead) return VK_ACCESS_2_SHADER_READ_BIT;
+            if(access == moxDescriptorAccessBoth) return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+            return VK_ACCESS_2_NONE;
         }
 
     private:
@@ -144,6 +153,7 @@ namespace mox
 
             mox::FileData data{};
             data.containsPingPong = false;
+            data.totalBindingUsage = 0;
             std::ifstream file(path.string() , std::ios::in);
             MOX_UNLIKELY if(!file.is_open()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("failed to process File | {} | , due to fail at opening the file" , path.string())});
 
@@ -257,6 +267,8 @@ namespace mox
                     {
                         data.containsPingPong = true;
                     }
+
+                    data.totalBindingUsage++;
                 }
                 else
                 {

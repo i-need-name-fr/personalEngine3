@@ -12,9 +12,11 @@
 #include <sl_pcl.h>           // маркеры PCL
 #include <sl_security.h>      
 #include "../logger/logger.hpp"
+
 #define SetTypicalOperators(type) type() = delete ;type(const type& input) = delete; type(type& input) = delete; type& operator=(type& input) = delete; type& operator=(const type& input) = delete;
 #define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}
 #define THROW_MESSAGE throw std::runtime_error("error occured , check logs")
+#define MOX_DECLARE_PTR_STRUCTURE(type) using p##type = std::shared_ptr<type>;
 
 namespace mox
 {
@@ -579,5 +581,5 @@ namespace mox
         }
     };
 
-    using pStreamlineContext = std::shared_ptr<StreamlineContext>;
+    MOX_DECLARE_PTR_STRUCTURE(StreamlineContext)
 }
