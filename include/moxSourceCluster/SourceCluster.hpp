@@ -39,11 +39,15 @@ namespace mox
         SourceCluster(SourceCluster&& input) = delete;
         SourceCluster& operator=(SourceCluster&& input) = delete;
 
+        explicit SourceCluster(const std::string& name)
+        {
+            this->name = name;
+        }
+
         MOX_NO_DISCARD virtual DescriptorBuffer2* requestBuffer() const noexcept
         {
             return _implRequestDSBuffer();
         }
-
 
         MOX_NO_DISCARD virtual DescriptorLayout* requestLayout() const noexcept
         {
@@ -54,6 +58,8 @@ namespace mox
         {
             return _implAskForBarrier(name , stage , access);
         }
+
+        const std::string requestName() const noexcept {return this->name;}
 
         virtual ~SourceCluster() noexcept
         {

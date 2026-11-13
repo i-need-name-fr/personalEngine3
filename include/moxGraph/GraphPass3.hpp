@@ -83,27 +83,24 @@ namespace mox
             processDelete();
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<void> bindBarriers(VkCommandBuffer& cmd ) noexcept
-        {
-            
-            return _implBindBarriers(cmd);
-        }
-
         // sendRequest 
         MOX_NO_DISCARD ErrorDataOutput<std::vector<moxGraphPassRequest>> sendRequest() noexcept
         {
             return _implSendRequestGR3();
         }
 
-        virtual bool requestExecution() const noexcept = 0;
-        virtual ErrorDataOutput<void> executePass(VkCommandBuffer &cmd) noexcept = 0;
-
         // processFeedback
 
-        MOX_NO_DISCARD ErrorDataOutput<void> analyzeFeedBack(const std::vector<moxGraphRenderFeedback> &feedback) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> analyzeFeedBack(const std::vector<moxGraphRenderFeedback> &feedback) noexcept
         {
             return _implProcessGRFeedback(feedback);
         }
+
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> initPass() noexcept = 0;
+        virtual bool requestExecution() const noexcept = 0;
+        virtual ErrorDataOutput<void> executePass(VkCommandBuffer &cmd) noexcept = 0;
+
+        virtual std::string getPassName() const noexcept {return passName;}
 
     protected:
 
@@ -186,13 +183,36 @@ namespace mox
         MOX_NO_DISCARD ErrorDataOutput<std::vector<pDescriptorBuffer2>> createdDBuffers(DescriptorLayout* layout) noexcept
         {
             return _implCreateDescriptorBuffers(layout);
-        }
+        }   
 
         // barriers
 
         MOX_NO_DISCARD ErrorDataOutput<void> createBarriers(const VkPipelineStageFlags2 stage , const std::uint32_t frameID ) noexcept
         {
             return _implCreateDBarrier(stage , frameID);
+        }
+
+        MOX_NO_DISCARD ErrorDataOutput<void> bindBarrier(VkCommandBuffer &cmd ,const VkPipelineStageFlags2 stage) noexcept
+        {
+            const auto result = createBarriers(stage , context->sc->frameIndex);
+            if(!result.has_value()) return result;
+            return _implBindBarriers(cmd);
+        }
+
+        MOX_NO_DISCARD pDescriptorBuffer2 getCurrentDBuffer(const std::vector<pDescriptorBuffer2> &buffers) const noexcept
+        {   
+            if(buffers.empty()) return nullptr;
+            if(!context) return nullptr;
+
+            if(containsPingPong)
+            {
+                return buffers[0];
+            }
+            else
+            {
+                const uint32_t frame = context->sc->frameIndex % 2;
+                return buffers[frame];
+            }
         }
 
     private:
@@ -541,8 +561,8 @@ namespace mox
         // feedback not includes GENERAL set , only general attachment and source cluster that are been requested
         MOX_NO_DISCARD ErrorDataOutput<void> _implProcessGRFeedback(const std::vector<moxGraphRenderFeedback> &feedback) noexcept
         {   
-            if(feedback.empty()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process GraphPass3 , since the feedback from GraphRender is empty"});
-            if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to processRGFeedback , since the moxFILE isnt being created , graph name -> " , passName)});
+            // the feedback can be empty : a pass with only the GENERAL set and no requested attachments
+            if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to processRGFeedback , since the moxFILE isnt being created , graph name -> {}" , passName)});
 
             for(auto& source : feedback)
             {
