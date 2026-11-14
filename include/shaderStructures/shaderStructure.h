@@ -1,5 +1,5 @@
-#ifndef SHADER_HPP
-#define SHADER_HPP
+#ifndef MOX_SHADER_STRUCTURES
+#define MOX_SHADER_STRUCTURES
 
 /*
 #ifdef __cplusplus
