@@ -92,6 +92,59 @@ namespace Source
         Image::pRenderImage2 motionVector; // done
         Image::pRenderImage2 viewImage; // done
 
+        // cleans the images of the frame ( cleanImages of FrameTargets in the first engine ) : the images that are written in this frame = the CURRENT half of every ping pong pair
+        // ( the same index that every pass takes : frameIndex % 2 ) and the images that have no pair . the other half is the previous frame , it is the history of the temporal
+        // passes and has to stay . call it once per frame , before the passes that write these images
+        // not cleaned : pixelCheck ( it was not cleaned in FrameTargets either )
+        void cleanImages(VkCommandBuffer& cmd) noexcept
+        {
+            if(!cmd || !context || !context->sc) return;
+
+            const uint32_t id = static_cast<uint32_t>(context->sc->frameIndex % 2);
+
+            const std::array<Image::RenderImage2* , 23> images = {
+                // the current half of the ping pong images
+                positionImage[id].get() , normalImage[id].get() , depthImage[id].get() , diffuseImage[id].get() , diffuseDistance[id].get() ,
+                specularImage[id].get() , specularDistance[id].get() , indirectImage[id].get() , indirectDistance[id].get() ,
+                shadowImage[id].get() , ambientImage[id].get() , HDRImage[id].get() ,
+                // the images without a pair
+                albedoImage.get() , roughnessImage.get() , metallicImage.get() , objectAOImage.get() , fShadowImage.get() , fAmbientImage.get() ,
+                finalImage.get() , motionVector.get() , viewImage.get() , guiImage.get() , guiCleanImage.get()
+            };
+
+            // one barrier for all the images : translateImage / translateImageUndefined also keep the state of the image
+            const auto transition = [&](const bool fromUndefined , const VkAccessFlags2 access , const VkPipelineStageFlags2 stage) -> void
+            {
+                std::array<VkImageMemoryBarrier2 , images.size()> barriers{};
+                uint32_t count = 0;
+                for(Image::RenderImage2* image : images)
+                {
+                    if(!image) continue;
+                    barriers[count] = fromUndefined ? image->translateImageUndefined(access , stage) : image->translateImage(access , stage);
+                    count++;
+                }
+
+                if(count == 0) return;
+
+                VkDependencyInfo info{};
+                info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                info.imageMemoryBarrierCount = count;
+                info.pImageMemoryBarriers = barriers.data();
+                vkCmdPipelineBarrier2(cmd , &info);
+            };
+
+            // the old contents are not needed : the transition from UNDEFINED , and the clear after it
+            transition(true , VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+
+            for(Image::RenderImage2* image : images)
+            {
+                if(image) image->cleanTheImage(cmd);
+            }
+
+            // from here it is an ordinary transition : the passes take the images from this state
+            transition(false , VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        }
+
     private:
 
         void processDelete() noexcept
@@ -200,13 +253,18 @@ namespace Source
                 metallicImage = std::make_shared<Image::RenderImage2>(info);
                 pixelCheck = std::make_shared<Image::RenderImage2>(info);
 
+                // the shadow has 2 channels : R is the shadow ( the clear value is 1 : no shadow ) , G is the number of the frames of the history ( 0 at the start ) , like in FrameTargets
+                // the other images after it have one channel , so only R of the clear value matters for them
                 info.clear.float32[0] = 1.0f;
-                info.clear.float32[1] = 1.0f;
-                info.clear.float32[2] = 1.0f;
-                info.clear.float32[3] = 1.0f;
-                
+                info.clear.float32[1] = 0.0f;
+                info.clear.float32[2] = 0.0f;
+                info.clear.float32[3] = 0.0f;
+
+                info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
                 shadowImage[0] = std::make_shared<Image::RenderImage2>(info);
                 shadowImage[1] = std::make_shared<Image::RenderImage2>(info);
+
+                info.imageFormat = VK_FORMAT_R32_SFLOAT;
                 ambientImage[0] = std::make_shared<Image::RenderImage2>(info);
                 ambientImage[1] = std::make_shared<Image::RenderImage2>(info);
                 fShadowImage = std::make_shared<Image::RenderImage2>(info);
@@ -234,7 +292,7 @@ namespace Source
                 }
 
                 {
-                    const auto result = _implAddSource(diffuseImage, "diffuseDistance");
+                    const auto result = _implAddSource(diffuseDistance, "diffuseDistance");
                     if(!result.has_value()) return result;
                 }
 

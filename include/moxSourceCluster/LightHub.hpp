@@ -493,8 +493,9 @@ namespace Source
                     data[0] = DescriptorData2::createData(lightBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
                     data[1] = DescriptorData2::createData(lightCellBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
                     data[2] = DescriptorData2::createData(lightCascadeBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
-                    data[3] = DescriptorData2::createData(lightCountPerTile.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
-                    data[4] = DescriptorData2::createData(tileLightIndices.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
+                    // the order of LightHub.hlsl : 3 - tileLightIndices , 4 - lightCountPerTile
+                    data[3] = DescriptorData2::createData(tileLightIndices.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
+                    data[4] = DescriptorData2::createData(lightCountPerTile.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
                     data[5] = DescriptorData2::createData(forwardInfo.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
 
 

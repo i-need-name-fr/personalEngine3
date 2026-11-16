@@ -90,7 +90,7 @@ namespace mox{
 
                 VkAccelerationStructureGeometryKHR geometry{};
                 geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-                geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+                geometry.flags = 0; // not opaque : the any hit shader is used for every geometry
                 geometry.pNext = nullptr;
                 geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
                 geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;

@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(MOX_LIGHT_HUB_INCLUDED) && MOX_LIGHT_HUB_INCLUDED >= 0u
+#if defined(MOX_LIGHT_HUB_INCLUDED) && MOX_LIGHT_HUB_INCLUDED >= 0u && defined(MOX_SHADER_STRUCTURES)
 [[vk::binding(0 , MOX_LIGHT_HUB_INCLUDED)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(1 , MOX_LIGHT_HUB_INCLUDED)]] RWStructuredBuffer<lg::LightCell> lightCells;
 [[vk::binding(2 , MOX_LIGHT_HUB_INCLUDED)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
@@ -39,5 +39,17 @@ void findLightIndices(const float3 P , out uint lightIndices[lg::MAX_LIGHT_PER_C
     const lg::LightCell cell = lightCells[gridID];
     lightCount = min(cell.totalLightCount , (uint)lg::MAX_LIGHT_PER_CELL);
     lightIndices = cell.lightIndices;
+}
+
+void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightCount){
+    firstLight = 0;
+    lightCount = 0;
+
+    uint2 tileCoord = currentPixel / forwardInfo.TILE_SIZE;
+    uint tileIndex = tileCoord.x + tileCoord.y * forwardInfo.TILE_PER_ROW;
+
+    // forward.hlsl's InterlockedAdd keeps counting past MAX_LIGHTS (it only stops WRITING there)
+    lightCount = min(lightCountPerTile[tileIndex] , (uint)MAX_LIGHTS);
+    firstLight = tileIndex * MAX_LIGHTS;
 }
 #endif

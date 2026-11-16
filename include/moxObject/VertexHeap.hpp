@@ -12,6 +12,8 @@
 
 namespace mox
 {
+    class Entity; // it records its data into the heap ( friend of VertexHeap )
+
     // NotStarted - Begin() was not called yet , Recording - between Begin() and End() ( append works ) , Finished - End() was called , the heap is closed
     enum class VertexHeapStatus : uint8_t
     {
@@ -33,6 +35,9 @@ namespace Source
 {
     class VertexHeap : public SourceCluster
     {
+        // Entity does not inherit the heap ( the constructor of the heap works only after End() ) , it uses the static recording functions of the protected part
+        friend class mox::Entity;
+
     public:
 
         inline static Buffer::pGeneralBuffer2<Buffer::BufferType::Device , false> vertexBuffer{nullptr};
@@ -683,8 +688,7 @@ namespace Source
                 info.instanceCustomIndex = index;
                 info.instanceShaderBindingTableRecordOffset = 0;
                 info.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-                // the BLAS is built opaque : the lamps and the alpha tested materials ( the holes of the leaves ) need the any hit shader , and this flag turns the opaque off for the instance
-                if(l.isLightSource != 0 || l.alphaMode != 0) info.flags |= VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
+                // nothing is opaque : the BLAS has no opaque flag and every instance uses the any hit shader
                 info.mask = (l.isLightSource ? moxInstanceMaskLight : moxInstanceMaskNonLight);
                 info.transform = matrixTransform34(instances[m.instanceIndex]);
 

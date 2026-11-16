@@ -61,6 +61,15 @@ namespace mox
             return _implAnalyzeFile(path);
         }
 
+        // the key of an attachment in SetData::attachments . the NAME is not enough : a ping pong resource can be declared twice in one set , as the "next" one ( PING_PONG_CURRENT: 1 ,
+        // the one that is written in this frame ) and as the "prev" one ( PING_PONG_CURRENT: 0 ) , both with the same NAME , since the shader has two variables for it
+        // so for a ping pong attachment PING_PONG_CURRENT is a part of the key . the real name is DescriptorAttachment::name , NOT the key
+        inline static std::string AttachmentKey(const std::string& name , const uint32_t pingPongRequired , const uint32_t pingPongCurrent) noexcept
+        {
+            if(!pingPongRequired) return name;
+            return name + "@" + std::to_string(pingPongCurrent);
+        }
+
         inline static VkAccessFlags2 TranslateToAccess(DescriptorAccess const &access) noexcept
         {
             if(access == moxDescriptorAccessWrite) return VK_ACCESS_2_SHADER_WRITE_BIT;
@@ -239,16 +248,30 @@ namespace mox
 
                     mox::SetData& set = setIt->second;
 
-                    if(set.attachments.contains(name))
+                    const std::string key = AttachmentKey(name , pingPongRequired , pingPongIndex);
+                    if(set.attachments.contains(key))
                     {
                         return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : attachment {} is already declared in the set {}" , path.string() , lineNumber , name , set.source)});
                     }
 
+                    // the same NAME twice is allowed only for a ping pong resource ( next + prev ) : both declarations have to be ping pong , and they differ by PING_PONG_CURRENT ( the key )
                     for(const auto& other : set.attachments)
                     {
-                        if(other.second.binding == binding)
+                        if(other.second.name == name && !(other.second.pingPongSystem && pingPongRequired))
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : binding {} is already used in the set {}" , path.string() , lineNumber , binding , set.source)});
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : attachment {} is already declared in the set {} , the same NAME twice is allowed only for a ping pong resource ( one PING_PONG_CURRENT: 1 and one PING_PONG_CURRENT: 0 )" , path.string() , lineNumber , name , set.source)});
+                        }
+                    }
+
+                    const std::string sSource = source;
+                    if(sSource == "GENERAL")
+                    {
+                        for(const auto& other : set.attachments)
+                        {
+                            if(other.second.binding == binding)
+                            {
+                                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED , std::format("File | {} | line {} : binding {} is already used in the set {}" , path.string() , lineNumber , binding , set.source)});
+                            }
                         }
                     }
 
@@ -261,7 +284,7 @@ namespace mox
                     attachment.pingPongSystem = pingPongRequired;
                     attachment.source = source;
                     attachment.type = dsTypeResult.value();
-                    set.attachments.emplace(attachment.name , std::move(attachment));
+                    set.attachments.emplace(key , std::move(attachment));
 
                     if(pingPongRequired)
                     {

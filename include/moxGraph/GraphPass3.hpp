@@ -3,7 +3,9 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 #include <any>
+#include <unordered_set>
 #include "../moxSourceCluster/SourceCluster.hpp"
+#include "../ShaderPipe2/ShaderPipe2.hpp"
 
 namespace mox
 {
@@ -204,7 +206,7 @@ namespace mox
             if(buffers.empty()) return nullptr;
             if(!context) return nullptr;
 
-            if(containsPingPong)
+            if(!containsPingPong)
             {
                 return buffers[0];
             }
@@ -213,6 +215,43 @@ namespace mox
                 const uint32_t frame = context->sc->frameIndex % 2;
                 return buffers[frame];
             }
+        }
+
+        MOX_NO_DISCARD ErrorDataOutput<void> processPipe(ShaderPipe2* pipe , VkShaderStageFlags stage , std::vector<VkPushConstantRange> pushs = {}) noexcept
+        {
+
+            // lets first of get from file the exact position of each set
+            const std::size_t size = moxFILE.value().sets.size();
+            std::vector<DescriptorLayout*> layouts(size);
+            for(auto& data : moxFILE.value().sets)
+            {
+                if(data.first == "GENERAL")
+                {   
+                    const auto result = createGeneralDL(stage);
+                    MOX_CHECK_RESULT(result)
+                    pipe->descriptorLayouts.push_back(result.value());
+                    // since the general is always the first
+                    layouts[0] = result.value().get();
+                    {
+                        const auto result_ = createdDBuffers(layouts[0]);
+                        MOX_CHECK_RESULT(result_)
+                        pipe->buffers = result_.value();
+                    }
+                }
+                else
+                {
+                    layouts[cSources[data.second.source].index] = cSources[data.second.source].source->requestLayout();
+                }
+            }
+
+            PipelineLayout::CreateInfo info{};
+            info.layouts = layouts;
+            info.ranges = pushs;
+            info.context = context;
+
+            pipe->layout = std::make_shared<PipelineLayout>(info);
+
+            return {};
         }
 
     private:
@@ -330,7 +369,7 @@ namespace mox
 
                 // WARNING FOR BUFFERS
                 // EACH BUFFER IS BUFFERBASE2 , NOT GENERALBUFFER2
-                const auto result = _implProcessSourceBarrier(binding , stage , barriers , it->second);
+                const auto result = _implProcessSourceBarrier(binding , stage , barriers , it->second.data);
                 if(!result.has_value()) return result;
             }
             else
@@ -452,26 +491,31 @@ namespace mox
                 // we want to ask for GENERAL ONLY sets , since the SourceCluster will output all in one , no need to make a request for each
                 if(sourceName == moxGraphRenderGeneralSet)
                 {
-                    for(const auto& att : setp.second.attachments) 
-                    {   
+                    // a ping pong resource can be declared twice ( "next" and "prev" ) , but GraphRender3 has to be asked for its _0 and _1 only once
+                    std::unordered_set<std::string> requestedPingPong{};
+
+                    for(const auto& att : setp.second.attachments)
+                    {
                         if(att.second.pingPongSystem)
                         {
+                            if(!requestedPingPong.insert(att.second.name).second) continue;
+
                             moxGraphPassRequest info{};
                             info.requestType = moxGraphPassRequestAttachment;
-                            info.name = moxPingPongName(att.first , 0); // the name of the attachment
+                            info.name = moxPingPongName(att.second.name , 0); // the name of the attachment
                             info.sourceName = sourceName; // source where we want to take it from ( the set )
                             // here we need to translate descriptor type to moxType , since GraphRender doesnt care about type of descriptor  , it requires type of DATA
                             info.bindingType = _implTransferTypeToData(att.second.type);
 
                             request.push_back(info); // for first _0
-                            info.name = moxPingPongName(att.first , 1);
+                            info.name = moxPingPongName(att.second.name , 1);
                             request.push_back(info); // for second _1
                         }
                         else
                         {
                             moxGraphPassRequest info{};
                             info.requestType = moxGraphPassRequestAttachment;
-                            info.name = att.first; // the name of the attachment
+                            info.name = att.second.name; // the name of the attachment
                             info.sourceName = sourceName; // source where we want to take it from ( the set )
                             // here we need to translate descriptor type to moxType , since GraphRender doesnt care about type of descriptor  , it requires type of DATA
                             info.bindingType = _implTransferTypeToData(att.second.type);
@@ -501,7 +545,7 @@ namespace mox
                         // the rule : GENERAL contains only buffers and images , samplers and TLAS live in SourceCluster
                         if(binding.second.type == VK_DESCRIPTOR_TYPE_SAMPLER || binding.second.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to setup the GraphPass , the GENERAL set can not contain a SAMPLER or an AS ( they belong to a SourceCluster ) , attachment -> {}" , binding.first)});
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to setup the GraphPass , the GENERAL set can not contain a SAMPLER or an AS ( they belong to a SourceCluster ) , attachment -> {}" , binding.second.name)});
                         }
 
                         moxGraphPassResource res{};
@@ -512,12 +556,12 @@ namespace mox
                         {
                             // one attachment in the file , but two resources : _0 and _1
 
-                            generalAttachments.insert({moxPingPongName(binding.first , 0) , {res}});
-                            generalAttachments.insert({moxPingPongName(binding.first , 1) , {res}});
+                            generalAttachments.insert({moxPingPongName(binding.second.name , 0) , {res}});
+                            generalAttachments.insert({moxPingPongName(binding.second.name , 1) , {res}});
                         }
                         else
                         {
-                            generalAttachments.insert({binding.first , {res}});
+                            generalAttachments.insert({binding.second.name , {res}});
                         }
                     }
                 }
