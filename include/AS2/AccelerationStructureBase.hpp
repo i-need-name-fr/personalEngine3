@@ -7,20 +7,8 @@ namespace mox{
     class AccelerationStructure{
     public:
 
-        AccelerationStructure() = delete;
-        AccelerationStructure(AccelerationStructure& input) = delete;
-        AccelerationStructure(const AccelerationStructure& input) = delete;
-        AccelerationStructure(AccelerationStructure&& input) noexcept{
-            processCopy(std::move(input));
-        }
-
-        AccelerationStructure& operator=(AccelerationStructure& input) = delete;
-        AccelerationStructure& operator=(const AccelerationStructure& input) = delete;
-        AccelerationStructure& operator=(AccelerationStructure&& input) noexcept{
-
-            processCopy(std::move(input));
-            return *this;
-        }
+        SetTypicalOperators(AccelerationStructure)
+        SetTypicalTransferOperators(AccelerationStructure)
 
         AccelerationStructure(moxContext2* context){
             // these two used to build the error and then fall through - a null context was
@@ -37,6 +25,7 @@ namespace mox{
                 THROW_MESSAGE;
             }
             this->device = context->logicalDevice->device;
+            this->context = context;
             if(!properties)
             {
                 VkPhysicalDeviceAccelerationStructurePropertiesKHR prop{};
@@ -62,6 +51,7 @@ namespace mox{
     protected:
 
         VkDevice device = nullptr;
+        moxContext2* context = nullptr;
         inline static std::optional<VkPhysicalDeviceAccelerationStructurePropertiesKHR> properties{};
 
         // the address of the scratch buffer rounded UP to minAccelerationStructureScratchOffsetAlignment ( the buffer has that many spare bytes , see the size of it ) .

@@ -4,12 +4,27 @@
 
 namespace mox{
 
+    /*
+
+        light objects 0x02
+        
+    
+    */
+
+    enum moxInstanceMask
+    {
+        moxInstanceMaskNonLight = 0x01,
+        moxInstanceMaskLight = 0x0F
+    };
+
     struct BLAS2_layout{
 
         uint32_t indexOffset;
         uint32_t indexCount;
         uint32_t vertexCount;
         uint32_t firstVertex;
+
+        moxInstanceMask mask;
     };
 
     class BLAS2 final : public AccelerationStructure{
