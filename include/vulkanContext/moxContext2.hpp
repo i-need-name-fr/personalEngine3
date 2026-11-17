@@ -32,6 +32,7 @@
 #define MOX_UNLIKELY [[unlikely]]
 #define MOX_LIKELY [[likely]]
 #define MOX_NO_DISCARD [[nodiscard]]
+#define MOX_RETURN_ERROR(type , message) return std::unexpected(ErrorDataType{type , message})
 
 namespace mox{
 

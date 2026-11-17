@@ -223,7 +223,7 @@ namespace mox
             info.context = Heap::context;
             info.format = format;
             info.path = path.string();
-
+            index = NON_VALID_SLOT;
             const auto result = Heap::txHub->addTexture(info);
             MOX_CHECK_RESULT(result)
 

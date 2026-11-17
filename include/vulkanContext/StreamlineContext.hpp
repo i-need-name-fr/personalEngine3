@@ -17,6 +17,7 @@
 #define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}
 #define THROW_MESSAGE throw std::runtime_error("error occured , check logs")
 #define MOX_DECLARE_PTR_STRUCTURE(type) using p##type = std::shared_ptr<type>;
+#define MOX_VAR_NAME(var) #var
 
 namespace mox
 {

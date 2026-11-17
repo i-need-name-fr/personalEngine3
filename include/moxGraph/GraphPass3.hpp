@@ -248,7 +248,6 @@ namespace mox
             info.layouts = layouts;
             info.ranges = pushs;
             info.context = context;
-
             pipe->layout = std::make_shared<PipelineLayout>(info);
 
             return {};
