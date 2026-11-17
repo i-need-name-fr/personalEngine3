@@ -942,9 +942,6 @@ static const float  BETA_MIE_SCAT      = 4.0e-5;
 static const float  BETA_MIE_ABS       = 4.4e-6;
 static const uint   AP_STEPS = 20;
 
-static const uint LUT_WIDTH  = 192;
-static const uint LUT_HEIGHT = 108;
-
 // the z depth ( meters ) that the froxel volume of the fog covers , the slices are spread logarithmically between these two . fogCalc ( writes the slices ) and
 // PostProcess ( reads them ) have to use the same numbers
 static const float FOG_NEAR = 0.01f;

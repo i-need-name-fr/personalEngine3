@@ -1,5 +1,5 @@
 #pragma once
-
+// #include "../../include/moxSourceCluster/LightHub.hlsl"
 #if defined(MOX_LIGHT_HUB_INCLUDED) && MOX_LIGHT_HUB_INCLUDED >= 0u && defined(MOX_SHADER_STRUCTURES)
 [[vk::binding(0 , MOX_LIGHT_HUB_INCLUDED)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(1 , MOX_LIGHT_HUB_INCLUDED)]] RWStructuredBuffer<lg::LightCell> lightCells;

@@ -1,4 +1,5 @@
 #pragma once
+// #include "../../include/moxSourceCluster/TextureHub.hlsl"
 #if defined(MOX_TEXTURE_HUB_INCLUDED) && MOX_TEXTURE_HUB_INCLUDED >= 0l
 
 [[vk::binding(0 , MOX_TEXTURE_HUB_INCLUDED)]] RWStructuredBuffer<uint> txVirtualBuffer;

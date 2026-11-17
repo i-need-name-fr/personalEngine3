@@ -27,14 +27,9 @@ struct TileFrustum{
 TileFrustum buildTileFrustum(uint2 tileCoord , uint2 tileSize , float4x4 invProj){
     float2 screenSize = float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
 
-    // the tile in pixels , the last row / column of tiles is cut by the edge of the screen.
-    // this used to be ( tileCoord + tileSize ) / screenSize - a tile index plus a tile size in pixels ,
-    // not the pixel position of the tile at all
     const float2 pixelMin = float2(tileCoord * tileSize);
     const float2 pixelMax = min(pixelMin + float2(tileSize) , screenSize);
 
-    // pixel ( 0 , 0 ) is the top left corner , but NDC y points up ( the engine flips it with the
-    // negative viewport height ) : the BOTTOM edge of the tile ( pixelMax.y ) is the smaller NDC y
     float2 tileMinNDC = float2(pixelMin.x / screenSize.x * 2.0f - 1.0f , 1.0f - pixelMax.y / screenSize.y * 2.0f);
     float2 tileMaxNDC = float2(pixelMax.x / screenSize.x * 2.0f - 1.0f , 1.0f - pixelMin.y / screenSize.y * 2.0f);
 
@@ -45,7 +40,6 @@ TileFrustum buildTileFrustum(uint2 tileCoord , uint2 tileSize , float4x4 invProj
     corners[3] = ScreenToViewDirection(float2(tileMinNDC.x, tileMaxNDC.y), invProj);
 
     TileFrustum frustum;
-    // каждая плоскость строится через ДВА соседних угла и начало координат (позиция камеры в view space = 0,0,0)
     frustum.planes[0] = computePlane(float3(0,0,0), corners[0], corners[3]);   // левая грань
     frustum.planes[1] = computePlane(float3(0,0,0), corners[2], corners[1]);   // правая грань
     frustum.planes[2] = computePlane(float3(0,0,0), corners[1], corners[0]);   // нижняя грань ( corners[0..1] - нижний край тайла )
@@ -105,7 +99,6 @@ void main(uint3 groupId : SV_GroupID , uint localIndex : SV_GroupIndex){
 
         uint writeIndex;
         InterlockedAdd(lightCountPerTile[tileIndex] , 1 , writeIndex);
-        // past MAX_LIGHTS this would write into the next tile's slots
         if(writeIndex < MAX_LIGHTS){
             tileLightIndices[tileIndex * MAX_LIGHTS + writeIndex] = lightIndex;
         }

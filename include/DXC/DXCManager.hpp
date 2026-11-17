@@ -17,8 +17,6 @@
 #include <filesystem>
 #include "../logger/logger.hpp"
 
-// clang for MinGW ignores __declspec(uuid) of dxcapi.h , so __uuidof(IDxcX) (and IID_PPV_ARGS) has no GUID and the linker fails on __mingw_uuidof<IDxcX>
-// the GUIDs are copied from dxcapi.h ( CROSS_PLATFORM_UUIDOF )
 extern "C++"
 {
     template<> inline const GUID& __mingw_uuidof<IDxcCompiler3>()

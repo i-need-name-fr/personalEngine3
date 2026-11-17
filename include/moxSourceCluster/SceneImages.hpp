@@ -1,7 +1,7 @@
 #pragma once
 
 #include "SourceCluster.hpp"
-
+#include "../Image2/MultiViewImage2.hpp"
 
 namespace mox
 {
@@ -92,10 +92,15 @@ namespace Source
         Image::pRenderImage2 motionVector; // done
         Image::pRenderImage2 viewImage; // done
 
-        // cleans the images of the frame ( cleanImages of FrameTargets in the first engine ) : the images that are written in this frame = the CURRENT half of every ping pong pair
-        // ( the same index that every pass takes : frameIndex % 2 ) and the images that have no pair . the other half is the previous frame , it is the history of the temporal
-        // passes and has to stay . call it once per frame , before the passes that write these images
-        // not cleaned : pixelCheck ( it was not cleaned in FrameTargets either )
+        Image::pMultiViewImage2<8 , Image::ViewPerType::Mip> HiZImage{nullptr};
+
+        // the barrier for a RANGE of the mips of HiZImage ( the build of the pyramid : mip i is written , then it is read to make mip i + 1 ) . the state of every mip is kept separately ,
+        // so a barrier for [ mipIndex , mipIndex + mipCount ) changes only those mips . requestBarrier( "HiZImage" , ... ) is the same for ALL the mips
+        MOX_NO_DISCARD VkImageMemoryBarrier2 requestHiZBarrier(const VkPipelineStageFlags2 stage , const VkAccessFlags2 access , const uint32_t mipCount , const uint32_t mipIndex) noexcept
+        {
+            return HiZImage->translateImage(access , stage , mipCount , mipIndex);
+        }
+
         void cleanImages(VkCommandBuffer& cmd) noexcept
         {
             if(!cmd || !context || !context->sc) return;
@@ -147,6 +152,18 @@ namespace Source
 
     private:
 
+        // requestBarrier( name , stage , access ) of the base class knows RenderImage2 , Texture2 , Skybox2 and the buffers , but not MultiViewImage2 : HiZImage is the whole image ( all the mips )
+        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
+        {
+            if(name == "HiZImage")
+            {
+                if(!HiZImage) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create barrier for HiZImage in SceneImages , since the image is nullptr"});
+                return HiZImage->translateWholeImage(access , stage);
+            }
+
+            return SourceCluster::_implAskForBarrier(name , stage , access);
+        }
+
         void processDelete() noexcept
         {
             viewImage = nullptr;
@@ -161,6 +178,7 @@ namespace Source
             fAmbientImage = nullptr;
             objectAOImage = nullptr;
             albedoImage = nullptr;
+            HiZImage = nullptr;
             for(const auto& id : { 0 ,1})
             {
                 positionImage[id] = nullptr;
@@ -270,6 +288,23 @@ namespace Source
                 fShadowImage = std::make_shared<Image::RenderImage2>(info);
                 fAmbientImage = std::make_shared<Image::RenderImage2>(info);
                 objectAOImage = std::make_shared<Image::RenderImage2>(info);
+
+                {
+                    Image::MultiViewImage2<8 , Image::ViewPerType::Mip>::CreateInfo info{};
+                    info.context = context;
+                    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    info.imageType = VK_IMAGE_TYPE_2D;
+                    info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    info.clear.float32[0] = 1.0f;
+                    info.clear.float32[1] = 1.0f;
+                    info.clear.float32[2] = 1.0f;
+                    info.clear.float32[3] = 1.0f;
+                    info.extent = context->sc->extent;
+                    info.imageFormat = VK_FORMAT_R32_SFLOAT;
+
+                    HiZImage = std::make_shared<Image::MultiViewImage2<8 , Image::ViewPerType::Mip>>(info);
+                }
 
                 {
                     const auto result = _implAddSource(positionImage , "positionImage");
@@ -391,6 +426,12 @@ namespace Source
                     if(!result.has_value()) return result;
                 }
 
+                {
+                    const auto result = _implAddSource(HiZImage.get() , "HiZImage");
+                    if(!result.has_value()) return result;
+                }
+
+
                 containsPingPong = true;
             }
             catch(std::exception&e)
@@ -409,7 +450,7 @@ namespace Source
                 dbuffers.resize(2);
                 for(const auto& id : {0 , 1})
                 {
-                    std::vector<DescriptorData2> data(36);
+                    std::vector<DescriptorData2> data(37);
                     data[0] = DescriptorData2::createData(positionImage[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                     data[1] = DescriptorData2::createData(positionImage[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
 
@@ -461,7 +502,7 @@ namespace Source
                     data[33] = DescriptorData2::createData(pixelCheck.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 33 , 0);
                     data[34] = DescriptorData2::createData(motionVector.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 34 , 0);
                     data[35] = DescriptorData2::createData(viewImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 35 , 0);
-
+                    data[36] = DescriptorData2::createData(HiZImage->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 36 , 0);
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -482,11 +523,13 @@ namespace Source
         {
             try
             {
-                std::vector<DescriptorLayoutData> data(36);
+                std::vector<DescriptorLayoutData> data(37);
                 for(auto& d : data)
                 {
                     d = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1};
                 }
+
+                data[36] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
 
                 DescriptorLayout::CreateInfo info{};
                 info.context = context;

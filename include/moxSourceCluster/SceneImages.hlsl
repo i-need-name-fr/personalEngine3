@@ -1,4 +1,6 @@
 #pragma once
+// #include "../../include/moxSourceCluster/SceneImages.hlsl"
+
 #if defined(MOX_SCENE_IMAGES_INCLUDED) && MOX_SCENE_IMAGES_INCLUDED >= 0l
 
 [[vk::image_format("rgba32f")]]
@@ -77,5 +79,5 @@
 [[vk::binding( 34   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float2> motionVector;
 [[vk::image_format("rgba32f")]]
 [[vk::binding( 35   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> viewImage;
-
+[[vk::binding( 36   ,   MOX_SCENE_IMAGES_INCLUDED   )]] Texture2D HiZImage;
 #endif

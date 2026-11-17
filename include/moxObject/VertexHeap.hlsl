@@ -1,5 +1,5 @@
 #pragma once
-
+//  #include "../../include/moxObject/VertexHeap.hlsl"
 #if defined (MOX_VERTEX_HEAP_INCLUDED) && MOX_VERTEX_HEAP_INCLUDED >= 0 && defined(MOX_SHADER_STRUCTURES)
 
 [[vk::binding(0 , MOX_VERTEX_HEAP_INCLUDED)]] RWStructuredBuffer<Vertex> vertices;

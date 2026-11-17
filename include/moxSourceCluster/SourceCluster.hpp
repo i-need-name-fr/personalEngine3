@@ -3,6 +3,8 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 #include <any>
+#include "../Image2/MultiViewImage2.hpp"
+
 // general idea of that class for GraphPass to get dlayout and dbuffers if it uses not only General one 
 
 namespace mox
@@ -207,6 +209,15 @@ namespace mox
         }
 
         MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Sampler* source , const std::string name) noexcept
+        {
+            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
+            if(sources.contains(name)) return {};
+            sources.insert({name , source});
+            return {};
+        }
+
+        template<std::uint32_t count>
+        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Mip>* source , const std::string name) noexcept
         {
             if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};

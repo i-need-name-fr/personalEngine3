@@ -223,6 +223,20 @@ namespace mox
             // lets first of get from file the exact position of each set
             const std::size_t size = moxFILE.value().sets.size();
             std::vector<DescriptorLayout*> layouts(size);
+
+            // the sets of the pipeline layout are numbered 0 .. N-1 without gaps ( GENERAL is the first one , 0 ) , a gap would be a nullptr layout , and an index >= N would write behind the vector
+            {
+                std::vector<uint8_t> used(size , 0);
+                for(const auto& data : moxFILE.value().sets)
+                {
+                    const std::uint32_t index = (data.first == "GENERAL") ? 0u : data.second.index;
+                    if(index >= size || used[index])
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process the pipe of GraphPass3 -> {} , the SET_INDEX of the set {} is {} , but the {} sets must have the indices 0 .. {} without gaps and without repeats ( GENERAL is always 0 )" , passName , data.first , index , size , size - 1)});
+                    }
+                    used[index] = 1;
+                }
+            }
             for(auto& data : moxFILE.value().sets)
             {
                 if(data.first == "GENERAL")
