@@ -225,6 +225,15 @@ namespace mox
             return {};
         }
 
+        template<std::uint32_t count>
+        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Layer>* source , const std::string name) noexcept
+        {
+            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
+            if(sources.contains(name)) return {};
+            sources.insert({name , source});
+            return {};
+        }
+
         MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(moxPingPongRenderImage2 source , const std::string name) noexcept
         {
             {

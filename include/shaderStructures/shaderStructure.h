@@ -707,10 +707,12 @@ namespace lg{
 
         alignas(16) glm::vec3 diffuse;
         alignas(16) glm::vec3 position;
+        alignas(16) glm::vec3 direction;
         uint32_t type;
     #else
         float3 diffuse;
         float3 position;
+        float3 direction;
         uint type;
     #endif
         float radius;

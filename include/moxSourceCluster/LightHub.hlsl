@@ -52,4 +52,21 @@ void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightC
     lightCount = min(lightCountPerTile[tileIndex] , (uint)MAX_LIGHTS);
     firstLight = tileIndex * MAX_LIGHTS;
 }
+
+void diskBasis(float3 N, out float3 U, out float3 V)
+{
+    float s = (N.z >= 0.0f) ? 1.0f : -1.0f;
+    float a = -1.0f / (s + N.z);
+    float b = N.x * N.y * a;
+    U = float3(1.0f + s * N.x * N.x * a, s * b, -s * N.x);
+    V = float3(b, s + N.y * N.y * a, -N.y);
+}
+
+// float3 pointU = center + U * radius;   // край диска в сторону U
+// float3 pointV = center + V * radius;   // край диска в сторону V
+
+// float r   = radius * sqrt(xi.x);
+// float phi = 2.0f * PI * xi.y;
+// float3 P  = center + U * (r * cos(phi)) + V * (r * sin(phi));
+
 #endif

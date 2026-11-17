@@ -453,7 +453,6 @@ namespace mox
                 data.vertexCount = input.vertices.size();
                 data.indexCount = input.indices.size();
                 data.indexOffset = meshBase.firstIndex;
-                data.mask = (input.isLightObject ? moxInstanceMaskLight : moxInstanceMaskNonLight);
 
                 const auto result  = Heap::appendASLayout(data);
                 MOX_CHECK_RESULT(result)

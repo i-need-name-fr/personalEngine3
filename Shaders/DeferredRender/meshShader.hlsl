@@ -115,6 +115,10 @@ bool cullTriangle(const float4 c0 , const float4 c1 , const float4 c2)
 
 }
 
+// add Tesselation
+// will be only 4 levels and hardcoded 
+// the dislocation of position will be based of roughness
+
 [shader("mesh")]
 [numthreads(128 , 1 , 1)]
 [outputtopology("triangle")]

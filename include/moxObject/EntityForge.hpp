@@ -50,6 +50,11 @@ namespace utils
             bluePrints.push_back(print);
         }
 
+        void update(VkCommandBuffer& cmd) noexcept
+        {
+            Source::VertexHeap::Update(cmd);
+        }
+
         MOX_NO_DISCARD ErrorDataOutput<void> execute() noexcept {return _implExecuteBluePrints();}
 
         void setMatrixM(const std::string& name , const glm::mat4 matrix , const std::uint32_t id = 0) noexcept

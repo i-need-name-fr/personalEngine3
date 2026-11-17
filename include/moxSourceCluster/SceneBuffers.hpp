@@ -13,6 +13,7 @@ namespace Source
 
     [[vk::binding(0 , MOX_SCENE_BUFFERS_INCLUDED)]] ConstantBuffer<GeneralInfo> generalBuffer;
     [[vk::binding(1 , MOX_SCENE_BUFFERS_INCLUDED)]] ConstantBuffer<GeneralFeatures> features;
+    [[vk::binding(2 , MOX_SCENE_BUFFERS_INCLUDED)]] ConstantBuffer<SunSource> sunBuffer;
 
     the names of the sources are the names of the HLSL variables ( the NAME in the .mox file ) , the order of the slots is the number of the binding
 
@@ -26,6 +27,7 @@ namespace Source
 
         Buffer::pDeviceReadableBuffer generalBuffer{nullptr};
         Buffer::pDeviceReadableBuffer features{nullptr};
+        Buffer::pDeviceReadableBuffer sunBuffer{nullptr};
 
         explicit SceneBuffers(moxContext2* context) : SourceCluster(context , "SceneBuffers")
         {
@@ -58,6 +60,7 @@ namespace Source
         {
             generalBuffer = nullptr;
             features = nullptr;
+            sunBuffer = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -78,11 +81,15 @@ namespace Source
                     GeneralFeatures defaultFeatures{};
                     info.size = sizeof(GeneralFeatures);
                     features = std::make_shared<Buffer::DeviceReadableBuffer>(info , &defaultFeatures);
+
+                    SunSource defaultSun{};
+                    info.size = sizeof(SunSource);
+                    sunBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info , &defaultSun);
                 }
 
-                // the layout : both are ConstantBuffer in the shader , so both are uniform buffers
+                // the layout : all three are ConstantBuffer in the shader , so all are uniform buffers
                 {
-                    std::vector<DescriptorLayoutData> data(2 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
+                    std::vector<DescriptorLayoutData> data(3 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -106,12 +113,18 @@ namespace Source
                     MOX_CHECK_RESULT(result)
                 }
 
+                {
+                    const auto result = _implAddSource(sunBuffer.get() , "sunBuffer");
+                    MOX_CHECK_RESULT(result)
+                }
+
                 // the descriptor buffer : the buffers never change , so it is made once ( there is no ping pong , one descriptor buffer )
                 {
                     std::vector<DescriptorData2> data{};
-                    data.reserve(2);
+                    data.reserve(3);
                     data.push_back(DescriptorData2::createData(generalBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0));
                     data.push_back(DescriptorData2::createData(features.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0));
+                    data.push_back(DescriptorData2::createData(sunBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0));
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
