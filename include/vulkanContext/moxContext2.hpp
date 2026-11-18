@@ -387,6 +387,37 @@ namespace mox{
             queueManager->recordCmd(function , stage);
             return queueManager->End();
         }
+
+        sl::Constants convertToConstants(const GeneralInfo& data , const glm::mat4 proj ) const noexcept
+        {
+            const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
+
+            sl::Constants slData{};
+            slData.cameraFar = data.playerFar;
+            slData.cameraNear = data.playerNear;
+            slData.cameraFOV = glm::radians(70.0f);
+            // matrixs
+            slData.depthInverted = sl::Boolean::eFalse;
+            slData.cameraMotionIncluded = sl::Boolean::eTrue;
+            slData.motionVectors3D = sl::Boolean::eFalse;
+            slData.cameraAspectRatio = aspect;
+
+            slData.cameraViewToClip = toSl(proj);
+            slData.clipToCameraView = toSl(data.inverseProj);
+            slData.clipToPrevClip = toSl(data.prevViewProj * data.invViewProj);
+            slData.prevClipToClip  = toSl(glm::inverse(data.prevViewProj * data.invViewProj));
+
+            slData.cameraPos  = mox::toSl(data.playerPosition);   // glm::vec3 -> sl::float3
+            slData.cameraFwd  = mox::toSl(data.playerDirection);
+            slData.cameraRight = mox::toSl(glm::normalize(glm::cross(data.playerDirection , glm::vec3(0.0f , 1.0f , 0.0f))));
+            slData.cameraUp = mox::toSl(glm::normalize(glm::cross(  glm::normalize(glm::cross(data.playerDirection , glm::vec3(0.0f , 1.0f , 0.0f))) , data.playerDirection)));
+            slData.reset = sl::Boolean::eFalse;
+
+            slData.jitterOffset = {0.0f , 0.0f};
+            slData.cameraPinholeOffset = {0.0f , 0.0f};
+            slData.mvecScale = {1.0f , 1.0f};
+            return slData;
+        }
     };
 
     inline uint32_t findMemoryIndex(moxContext2* base , uint32_t index , VkMemoryPropertyFlags flags){

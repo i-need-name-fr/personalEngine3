@@ -41,12 +41,12 @@ namespace mox
 
         template<typename T>
         requires _moxGraphRenderType_<T>
-        MOX_NO_DISCARD ErrorDataOutput<void> bindSource(T source , const std::string name) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> bindSource(T source , const std::string name) noexcept 
         {
             return _implBindSource(source , name);
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<void> bindSourceCluster(SourceCluster* source) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> bindSourceCluster(SourceCluster* source) noexcept __attribute__((nonnull))
         {
             return _implBindCluster(source);
         }

@@ -24,7 +24,7 @@ namespace mox
 
     struct VertexHeapStart
     {
-        moxContext2* context = nullptr;
+        moxContext2* context  = nullptr;
         Source::TextureHub* txHub = nullptr;
         Source::LightHub* ltHub = nullptr;
     };
@@ -92,12 +92,8 @@ namespace Source
             return {};
         }
 
-        // the VertexHeap as a SourceCluster : the descriptor set ( dlayouts[0] , dbuffers[0] ) and the sources are made from the buffers that End() created ,
-        // so it can be created ONLY AFTER a successful End() : before it ( not started , or still recording ) the constructor throws , and nothing is created .
-        // the buffers are static and are never recreated , so the descriptors never go stale
         explicit VertexHeap() : SourceCluster(_implGetContext() , "VertexHeap")
         {
-            // the check and the creation of the descriptors are ONE critical section : End() or Destroy() of another thread can not happen between them
             std::lock_guard<std::recursive_mutex> guard(heapMutex);
 
             const VertexHeapStatus status = getStatus();
@@ -109,7 +105,6 @@ namespace Source
                 THROW_MESSAGE;
             }
 
-            // End() was done , but Destroy() could have been called after it : _implInitDescriptors checks that every buffer exists
             const auto result = _implInitDescriptors();
             if(!result.has_value())
             {
@@ -119,7 +114,6 @@ namespace Source
             }
         }
 
-        // creates all the buffers from the recorded data ( like End() of Mesh2 in the first engine ) and does the first upload
         MOX_NO_DISCARD inline static ErrorDataOutput<void> End() noexcept
         {
             std::lock_guard<std::recursive_mutex> guard(heapMutex);
@@ -514,9 +508,6 @@ namespace Source
             }
         }
 
-        // ------------------------------------------------ buffers and descriptors ------------------------------------------------
-
-        // a static buffer : the size is the size of the data , but never 0 ( a buffer can not have the size 0 , and the descriptor needs a valid range even if there are no meshlets )
         template<typename T>
         inline static Buffer::pGeneralBuffer2<Buffer::BufferType::Device , false> _implCreateStatic(std::vector<T>& data , const VkBufferUsageFlags usage)
         {
@@ -528,7 +519,6 @@ namespace Source
             return std::make_shared<Buffer::GeneralBuffer2<Buffer::BufferType::Device , false>>(info , Buffer::translateToSpan(data));
         }
 
-        // a dynamic buffer ( readable by the CPU ) : MOX_MAX_INSTANCE_COUNT elements , the data goes there by _implRecord and Update()
         template<typename T>
         inline static Buffer::pGeneralBuffer2<Buffer::BufferType::Device , true> _implCreateDynamic(const VkBufferUsageFlags usage)
         {
@@ -547,15 +537,12 @@ namespace Source
             buffer->recordData(Buffer::translateToSpan(data));
         }
 
-        // the context is static and Begin() writes it , so it is read under the lock too ( the constructor passes it to the SourceCluster before its own body starts )
         MOX_NO_DISCARD inline static moxContext2* _implGetContext() noexcept
         {
             std::lock_guard<std::recursive_mutex> guard(heapMutex);
             return context;
         }
 
-        // the layout , the sources and the descriptor buffer of the cluster
-        // THE ORDER OF THE SLOTS IS THE NUMBER OF THE BINDING in VertexHeap.hlsl ( 0 - 10 ) , the TLAS is 11 , and the names are the names of the sources ( the NAME in the .mox file )
         MOX_NO_DISCARD ErrorDataOutput<void> _implInitDescriptors() noexcept
         {
             try

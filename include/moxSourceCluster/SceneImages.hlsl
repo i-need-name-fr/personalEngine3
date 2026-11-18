@@ -80,4 +80,6 @@
 [[vk::image_format("rgba32f")]]
 [[vk::binding( 35   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> viewImage;
 [[vk::binding( 36   ,   MOX_SCENE_IMAGES_INCLUDED   )]] Texture2D HiZImage;
+// 1D LUT over the roughness ( the coordinate 0 .. 1 ) , R16_SFLOAT : the value is in .x . sample it with a CLAMP sampler
+[[vk::binding( 37   ,   MOX_SCENE_IMAGES_INCLUDED   )]] Texture1D MultiScatterRoughness;
 #endif

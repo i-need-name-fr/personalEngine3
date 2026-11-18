@@ -10,19 +10,6 @@ namespace Image{
         Mip
     };
 
-    // =============================== INFO ===============================
-    // MultiViewImage2 : ONE image with `count` slices ( layers or mips ) , every slice has its own view and its own state ( access and stage ) ,
-    // so a pass can write one slice while another pass reads a different one , and the barriers know what happened to every slice
-    //
-    // views[i]  : the view of the slice i ( only that layer or only that mip )
-    // fullView  : the view of the WHOLE image : all the layers ( 2D array ) , or all the mips ( the same view type as the slices ) ,
-    //             for reading it as an array / a mip chain after the slices were written
-    //
-    // translateImage( access , stage , count , index ) : the barrier for the slices [ index , index + count ) , the state of every one
-    //                                                    of them is updated , the source masks are the union of their old states
-    // translateWholeImage( access , stage )            : the same for all the slices ( for fullView )
-    // =============================== END ===============================
-
     template<uint32_t count , ViewPerType type>
     requires(count >= 2)
     class MultiViewImage2 final : public ImageBase2{

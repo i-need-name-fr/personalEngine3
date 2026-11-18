@@ -81,7 +81,12 @@ namespace math
             return *this;
         }
 
-        bool operator==(const mVector<Type>& input) const noexcept
+        std::uint64_t size() const noexcept
+        {
+            return __data.size();
+        }
+
+        bool operator==(const mVector<Type>& input) const noexcept 
         {
             if(this == &input) return true;
             if(input.size() != this->size()) return false;
@@ -288,11 +293,6 @@ namespace math
         {
             if(__data.empty()) return;
             __data.pop_back();
-        }
-
-        std::uint64_t size() const noexcept
-        {
-            return __data.size();
         }
 
         void resize(const std::size_t size) noexcept

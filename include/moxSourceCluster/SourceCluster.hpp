@@ -71,7 +71,7 @@ namespace mox
     protected:
 
         // only the heirs can create it ( SourceBuffers and so on ) , the default constructor is deleted by SetTypicalOperators
-        explicit SourceCluster(moxContext2* context , const std::string& name) noexcept
+        explicit SourceCluster(moxContext2* context , const std::string& name) noexcept __attribute__((nonnull))
         {
             this->context = context;
             this->name = name;
@@ -168,67 +168,59 @@ namespace mox
             return dlayouts[0].get();
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Buffer::BufferBase2* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Buffer::BufferBase2* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::RenderImage2* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::RenderImage2* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::Skybox2* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::Skybox2* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(AccelerationStructure* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(AccelerationStructure* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::Texture2* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Image::Texture2* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Sampler* source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(Sampler* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
         template<std::uint32_t count>
-        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Mip>* source , const std::string name) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Mip>* source , const std::string name) noexcept __attribute__((nonnull)) 
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};
         }
 
         template<std::uint32_t count>
-        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Layer>* source , const std::string name) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> _implAddSource(Image::MultiViewImage2<count , Image::ViewPerType::Layer>* source , const std::string name) noexcept __attribute__((nonnull))
         {
-            if(!source) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to add Source for SourceCluster , since the pointer is nullptr , name -> {}", name )});
             if(sources.contains(name)) return {};
             sources.insert({name , source});
             return {};

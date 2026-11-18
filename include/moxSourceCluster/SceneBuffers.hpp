@@ -28,6 +28,7 @@ namespace Source
         Buffer::pDeviceReadableBuffer generalBuffer{nullptr};
         Buffer::pDeviceReadableBuffer features{nullptr};
         Buffer::pDeviceReadableBuffer sunBuffer{nullptr};
+        Buffer::pDeviceStaticBuffer SSAO_kernel{nullptr};
 
         explicit SceneBuffers(moxContext2* context) : SourceCluster(context , "SceneBuffers")
         {
@@ -61,6 +62,7 @@ namespace Source
             generalBuffer = nullptr;
             features = nullptr;
             sunBuffer = nullptr;
+            SSAO_kernel = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -85,11 +87,35 @@ namespace Source
                     SunSource defaultSun{};
                     info.size = sizeof(SunSource);
                     sunBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info , &defaultSun);
+
+                    {
+                        Buffer::DeviceStaticBuffer::CreateInfo info{};
+                        info.context = context;
+                        info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                        info.size = sizeof(glm::vec4) * 64;
+
+                        std::vector<glm::vec4> kernels(64,  glm::vec4(0.0f));
+
+                        static std::random_device rndDevice;
+                        static std::mt19937 engine(rndDevice());
+                        
+                        std::uniform_real_distribution<float> rndFloat(0.0f , 1.0f);
+
+                        for(auto& vec : kernels)
+                        {
+                            glm::vec3 sample = glm::vec3(rndFloat(engine) * 2.0f - 1.0f , rndFloat(engine) * 2.0f - 1.0f , rndFloat(engine));
+                            sample = glm::normalize(sample) * rndFloat(engine);
+                            vec = glm::vec4(sample.x , sample.y , sample.z , 0.0f);
+                        }
+
+                        SSAO_kernel = std::make_shared<Buffer::DeviceStaticBuffer>(info , Buffer::translateToSpan(kernels));
+                    }
                 }
 
                 // the layout : all three are ConstantBuffer in the shader , so all are uniform buffers
                 {
-                    std::vector<DescriptorLayoutData> data(3 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
+                    std::vector<DescriptorLayoutData> data(4 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
+                    data[3] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -118,13 +144,19 @@ namespace Source
                     MOX_CHECK_RESULT(result)
                 }
 
+                {
+                    const auto result = _implAddSource(SSAO_kernel.get() , "SSAO_kernel");
+                    MOX_CHECK_RESULT(result)
+                }
+
                 // the descriptor buffer : the buffers never change , so it is made once ( there is no ping pong , one descriptor buffer )
                 {
                     std::vector<DescriptorData2> data{};
-                    data.reserve(3);
+                    data.reserve(4);
                     data.push_back(DescriptorData2::createData(generalBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0));
                     data.push_back(DescriptorData2::createData(features.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0));
                     data.push_back(DescriptorData2::createData(sunBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0));
+                    data.push_back(DescriptorData2::createData(SSAO_kernel.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0));
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

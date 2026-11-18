@@ -497,16 +497,10 @@ struct ForwardPlusInfo{
 
 #define SSAO_REQUIRED 1
 #define HBAO_REQUIRED 2
-#define RTAO_REQUIRED 3
+#define NAO_REQUIRED 3
 #define RSSAO_REQUIRED 4
 #define RHBAO_REQUIRED 5
 #define AO_NOT_REQUIRED 0
-
-#define SSR_REQUIRED 1
-
-#define NON_REQUIRED 0
-#define SSGI_REQUIRED 2
-#define DDGI_REQUIRED 3
 
 #define DEFAULT_MODE 0
 #define ALBEDO_MODE 1
@@ -537,22 +531,13 @@ struct GeneralFeatures{
 
     uint32_t indirectMode;
 
-    uint32_t VSM;
-    uint32_t RayQuery;
-
     // the number of the rays of the soft shadows : of the lamp and of the sun ( 0 - that source does not trace )
-    uint32_t RayQueryLightSampleCount;
     float shadowThickness;
-    float temporalShadowK;
-    float light_sun_Proportion;
-
     uint32_t RT;
     uint32_t PT;
 
     uint32_t ReSTIRGI;
     uint32_t ReSTIRGI_temporal;
-    uint32_t ReSTIRGI_spatial;
-
 
     uint32_t NRC;
     uint32_t currentMode;
@@ -560,12 +545,12 @@ struct GeneralFeatures{
     uint32_t volumentricFog;
     float IndirectShare;
     float maxDepth;
-    uint32_t RayQuerySunSampleCount;
     uint32_t ReSTIR;
     float lightShadowFade;
     uint32_t skyboxSampleCount;
     float sunShadowFade;
-    float shadowMinimum;
+
+    uint32_t NKPD;
 #else
 
     uint AO;
@@ -575,21 +560,12 @@ struct GeneralFeatures{
 
     uint indirectMode;
 
-    uint VSM;
-    uint RayQuery;
-
-    uint RayQueryLightSampleCount;
     float shadowThickness;
-    float temporalShadowK;
-    float light_sun_Proportion;
-
     uint RT;
     uint PT;
 
     uint ReSTIRGI;
     uint ReSTIRGI_temporal;
-    uint ReSTIRGI_spatial;
-
     
     uint NRC;
 
@@ -601,8 +577,6 @@ struct GeneralFeatures{
     float IndirectShare;
     float maxDepth;
 
-    uint RayQuerySunSampleCount;
-
     uint ReSTIR;
 
     float lightShadowFade;
@@ -611,8 +585,7 @@ struct GeneralFeatures{
 
     float sunShadowFade;
 
-    float shadowMinimum;
-
+    uint32_t NKPD;
 #endif
 };
 
@@ -843,7 +816,7 @@ namespace ms
 namespace NRC
 {   
 
-    struct _TrainingSample
+    struct TrainingSample
     {
 #ifdef __cplusplus
         alignas(16) glm::vec3 radiance;
@@ -934,7 +907,8 @@ static const uint  AP_HEIGHT = 32; // screen Y
 static const uint  AP_SLICES = 32; // дистанция (froxel-слои)
 
 static const float DEPTH_RANGE = 128000.0; // метров — максимальная дистанция froxel'а
-static const uint FACE_SIZE = 128;
+// the size of one face of the skybox cube : has to be the same as AtmoScat::skyboxResolution ( include/moxSourceCluster/AtmoScat.hpp )
+static const uint FACE_SIZE = 1024;
 static const float PLANET_RADIUS     = 6371000.0;
 static const float ATMOSPHERE_RADIUS = 6471000.0;
 static const float H_RAYLEIGH = 8500.0;

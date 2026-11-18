@@ -151,10 +151,17 @@ namespace mox{
             vulkan12.descriptorBindingUpdateUnusedWhilePending     = VK_TRUE;
             vulkan12.pNext = &descriptorBuffer;
 
+            // Streamline ( DLSS-G ) calls vkCreatePrivateDataSlot , so the feature has to be on ( without it the validation layers report VUID-vkCreatePrivateDataSlot-privateData-04564 ) .
+            // it is the core 1.3 struct of ONE feature : the other 1.3 features here ( sync2 , dynamic rendering ) are separate structs too , so VkPhysicalDeviceVulkan13Features is not used
+            VkPhysicalDevicePrivateDataFeatures privateDataFeatures{};
+            privateDataFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
+            privateDataFeatures.privateData = VK_TRUE;
+            privateDataFeatures.pNext = &vulkan12;
+
             VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
             shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
             shaderObjectFeatures.shaderObject = VK_TRUE;
-            shaderObjectFeatures.pNext = &vulkan12;
+            shaderObjectFeatures.pNext = &privateDataFeatures;
 
             VkPhysicalDeviceDynamicRenderingFeatures dynamic{};
             dynamic.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;

@@ -94,6 +94,12 @@ namespace Source
 
         Image::pMultiViewImage2<8 , Image::ViewPerType::Mip> HiZImage{nullptr};
 
+        // a 1D LUT over the roughness ( the coordinate is the roughness , 0 .. 1 ) for the multiple scattering of the specular lobe : the average albedo of the BRDF for a roughness
+        // ( the energy that a single scattering loses ) . it is made once : a compute pass writes it ( STORAGE_BIT ) , the lighting reads it ( Texture1D , binding 37 ) , it is NOT cleared in cleanImages
+        // the sampler for it has to CLAMP : with the REPEAT sampler of the TextureHub the roughness 1.0 would blend with the roughness 0
+        static constexpr uint32_t multiScatterRoughnessSize = 128;
+        Image::pRenderImage2 MultiScatterRoughness{nullptr};
+
         // the barrier for a RANGE of the mips of HiZImage ( the build of the pyramid : mip i is written , then it is read to make mip i + 1 ) . the state of every mip is kept separately ,
         // so a barrier for [ mipIndex , mipIndex + mipCount ) changes only those mips . requestBarrier( "HiZImage" , ... ) is the same for ALL the mips
         MOX_NO_DISCARD VkImageMemoryBarrier2 requestHiZBarrier(const VkPipelineStageFlags2 stage , const VkAccessFlags2 access , const uint32_t mipCount , const uint32_t mipIndex) noexcept
@@ -179,6 +185,7 @@ namespace Source
             objectAOImage = nullptr;
             albedoImage = nullptr;
             HiZImage = nullptr;
+            MultiScatterRoughness = nullptr;
             for(const auto& id : { 0 ,1})
             {
                 positionImage[id] = nullptr;
@@ -237,12 +244,8 @@ namespace Source
                 HDRImage[0] = std::make_shared<Image::RenderImage2>(info);
                 HDRImage[1] = std::make_shared<Image::RenderImage2>(info);
 
-                // now the indirect image will always have the extent half of the original , therefore we will consider later in shaders and for ReBLUR to be changed
-                info.extent = {info.extent.width / 2 , info.extent.height / 2};
                 indirectImage[0] = std::make_shared<Image::RenderImage2>(info);
                 indirectImage[1] = std::make_shared<Image::RenderImage2>(info);
-
-                info.extent = context->sc->extent; // back to the normal extent 
                 
                 info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -304,6 +307,26 @@ namespace Source
                     info.imageFormat = VK_FORMAT_R32_SFLOAT;
 
                     HiZImage = std::make_shared<Image::MultiViewImage2<8 , Image::ViewPerType::Mip>>(info);
+                }
+
+                {
+                    // a 1D image : one row of texels ( the height is 1 ) and a 1D view
+                    Image::RenderImage2::CreateInfo info{};
+                    info.context = context;
+                    info.imageFormat = VK_FORMAT_R16_SFLOAT;
+                    info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                    info.extent = {multiScatterRoughnessSize , 1};
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    info.viewType = VK_IMAGE_VIEW_TYPE_1D;
+                    info.imageType = VK_IMAGE_TYPE_1D;
+                    info.layerCount = 1;
+                    info.mipMapCount = 1;
+                    info.clear.float32[0] = 0.0f;
+                    info.clear.float32[1] = 0.0f;
+                    info.clear.float32[2] = 0.0f;
+                    info.clear.float32[3] = 0.0f;
+
+                    MultiScatterRoughness = std::make_shared<Image::RenderImage2>(info);
                 }
 
                 {
@@ -431,6 +454,11 @@ namespace Source
                     if(!result.has_value()) return result;
                 }
 
+                {
+                    const auto result = _implAddSource(MultiScatterRoughness.get() , "MultiScatterRoughness");
+                    if(!result.has_value()) return result;
+                }
+
 
                 containsPingPong = true;
             }
@@ -450,7 +478,7 @@ namespace Source
                 dbuffers.resize(2);
                 for(const auto& id : {0 , 1})
                 {
-                    std::vector<DescriptorData2> data(37);
+                    std::vector<DescriptorData2> data(38);
                     data[0] = DescriptorData2::createData(positionImage[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                     data[1] = DescriptorData2::createData(positionImage[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
 
@@ -503,6 +531,7 @@ namespace Source
                     data[34] = DescriptorData2::createData(motionVector.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 34 , 0);
                     data[35] = DescriptorData2::createData(viewImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 35 , 0);
                     data[36] = DescriptorData2::createData(HiZImage->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 36 , 0);
+                    data[37] = DescriptorData2::createData(MultiScatterRoughness.get() , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 37 , 0);
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -523,13 +552,14 @@ namespace Source
         {
             try
             {
-                std::vector<DescriptorLayoutData> data(37);
+                std::vector<DescriptorLayoutData> data(38);
                 for(auto& d : data)
                 {
                     d = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1};
                 }
 
                 data[36] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
+                data[37] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
 
                 DescriptorLayout::CreateInfo info{};
                 info.context = context;

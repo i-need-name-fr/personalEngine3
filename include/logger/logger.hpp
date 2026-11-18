@@ -165,6 +165,14 @@ namespace mox{
         {
             _implSetupMessage(MOX_ERROR_TYPE_NONE , message);
         }
+
+        // a string literal is a const char* : without this overload it converts to const void* ( the first overload above , a STANDARD conversion beats the user defined one to std::string ) ,
+        // and the characters of the text are read as a messageCreateInfo : engineLogger("text") crashed with an access violation
+        void operator()(const char* message) noexcept
+        {
+            if(!message) return;
+            _implSetupMessage(MOX_ERROR_TYPE_NONE , std::string(message));
+        }
     };
 
     inline EngineLogger_T engineLogger{};

@@ -74,7 +74,7 @@ namespace mox
         SetTypicalOperators(GraphPass3)
         SetTypicalTransferOperators(GraphPass3)
 
-        explicit GraphPass3(moxContext2* context , const std::string& name) noexcept
+        explicit GraphPass3(moxContext2* context , const std::string& name) noexcept __attribute__((nonnull))
         {
             this->context = context;
             this->passName = name;
@@ -93,7 +93,7 @@ namespace mox
 
         // processFeedback
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<void> analyzeFeedBack(const std::vector<moxGraphRenderFeedback> &feedback) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> analyzeFeedBack(const std::vector<moxGraphRenderFeedback> &feedback) noexcept
         {
             return _implProcessGRFeedback(feedback);
         }
@@ -351,8 +351,6 @@ namespace mox
             return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process Source , since the source contains different type of data comparing to Descriptor request , binding -> {} , from -> {}" , binding.name , binding.source)});
         }
 
-        // PING_PONG_CURRENT : 1 is the "next" one = the one which is written in this frame ( frameIndex % 2 ) , 0 is the "prev" one = the other one
-        // frameParity = frameIndex % 2
         MOX_NO_DISCARD static std::string _implResolveName(const DescriptorAttachment& binding , const uint32_t frameParity) noexcept
         {
             if(!binding.pingPongSystem) return binding.name;
@@ -362,18 +360,14 @@ namespace mox
 
         MOX_NO_DISCARD ErrorDataOutput<void> _implProcessAttachmentBarrier(const DescriptorAttachment& binding , VkPipelineStageFlags2 const stage , moxDynamicBarrier& barriers , const uint32_t frameParity) noexcept
         {
-            // the real name of the resource : positionImage -> positionImage_0 or positionImage_1
             const std::string resolvedName = _implResolveName(binding , frameParity);
 
-            // a sampler and an acceleration structure have no access state , so there is nothing to put a barrier on
             if(binding.type == VK_DESCRIPTOR_TYPE_SAMPLER || binding.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) return {};
 
             if(binding.action == moxDescriptorAccessUndefined) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process descriptor attachment , since the action is undefined , binding -> {}, from {}" , binding.name ,binding.source )});
 
-            // now we need to find that binding 
             if(binding.source == DescriptorFile::_moxGeneralSet)
             {
-                // we are looking in the general attachments
                 const auto it = generalAttachments.find(resolvedName);
                 if(it == generalAttachments.end())
                 {
@@ -695,25 +689,25 @@ namespace mox
                 {
                     const auto d = std::any_cast<Buffer::BufferBase2*>(source);
                     if(!d) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 , since the source is nullptr , name -> {}" , resolvedName)});
-                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , att.count);
+                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , 0);
                 }
                 else if(source.type() == typeid(Image::RenderImage2*))
                 {
                     const auto d = std::any_cast<Image::RenderImage2*>(source);
                     if(!d) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 , since the source is nullptr , name -> {}" , resolvedName)});
-                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , att.count);
+                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , 0);
                 }
                 else if(source.type() == typeid(Image::Skybox2*))
                 {
                     const auto d = std::any_cast<Image::Skybox2*>(source);
                     if(!d) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 , since the source is nullptr , name -> {}" , resolvedName)});
-                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , att.count);
+                    data[att.binding] = DescriptorData2::createData(d , att.type , att.binding , 0);
                 }
                 else if(source.type() == typeid(Image::Texture2*))
                 {
                     const auto d = std::any_cast<Image::Texture2*>(source);
                     if(!d) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 , since the source is nullptr , name -> {}" , resolvedName)});
-                    data[att.binding] = DescriptorData2::createData(d , att.binding , att.count);
+                    data[att.binding] = DescriptorData2::createData(d , att.binding , 0);
                 }
                 else
                 {
