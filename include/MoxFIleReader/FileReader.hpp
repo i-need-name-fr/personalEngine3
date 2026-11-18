@@ -20,7 +20,7 @@ namespace mox
         moxDescriptorAccessBoth
     };
 
-
+    #define MOX_GENERAL_SET_DEFAULT_INDEX 0ul
 
     struct DescriptorAttachment
     {
@@ -196,6 +196,14 @@ namespace mox
                     if(data.sets.contains(set.source))
                     {
                         return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to analyze the file , since Set has been declared 2 times , file -> {}" , path.string())});
+                    }
+
+                    if(set.source == _moxGeneralSet)
+                    {
+                        if(set.index != MOX_GENERAL_SET_DEFAULT_INDEX)
+                        {
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze the file , since the general set is NOT index 0 , general ID -> {} , file ->{}" , set.index , path.string())});
+                        }
                     }
 
                     data.sets.insert(std::pair<std::string , mox::SetData>(set.source , set));

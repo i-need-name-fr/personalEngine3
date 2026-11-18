@@ -115,6 +115,11 @@ namespace mox
             containsPingPong = false;
             passName = moxGraphPassDefaultName;
             context = nullptr;
+            __dbG.clear();
+            __dbBindingInfo.clear();
+            __dbSet.clear();
+            __dbNames.clear();
+            __dsets.clear();
         }
 
         virtual void processCopy(GraphPass3&& input) noexcept
@@ -267,10 +272,22 @@ namespace mox
             return {};
         }
 
+        void bindAutoDescriptorBuffers(VkCommandBuffer& cmd , const VkPipelineBindPoint& point , PipelineLayout* layout) noexcept __attribute__((nonnull)) 
+        {
+            _implBindDescriptorBuffers(cmd , point , layout);
+        }
+
     private:
 
         std::optional<mox::FileData> moxFILE{}; // file should be analyzed from start , given both .hlsl and .mox files 
         // we need functions to send data to the GraphRender
+        std::vector<DescriptorBuffer2*> __dbG{}; // general Descriptor buffers for automatic binding
+        std::vector<DescriptorBuffer2*> __dbSet{}; // a dynamic set of buffers
+        std::vector<uint32_t> __dsets{};
+        std::vector<VkDeviceSize> __doffsets{};
+        std::vector<std::string> __dbNames{}; // instruction to which db bind and at which position
+        std::vector<VkDescriptorBufferBindingInfoEXT> __dbBindingInfo{};
+        bool __hasGeneralSet{false};
 
         moxGraphBindingType _implTransferTypeToData(const VkDescriptorType type) const noexcept
         {
@@ -541,8 +558,31 @@ namespace mox
             if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to send request for graph render3 , since the fileData is empty"});
             
             containsPingPong = moxFILE->containsPingPong;
-
+            __hasGeneralSet = false; // if it contains general, it will add one more
             // now we create all the sources and add attachments
+            __dbNames.resize(moxFILE.value().sets.size());
+
+            // the indices of the sets have to be 0 .. N-1 , without gaps and without repeats : the position in __dbNames / __dbSet IS the number of the set , and the descriptor buffers are bound
+            // as 0 .. N-1 in a row . N sets with N different indices that are all below N cannot have a gap , so two checks are enough . ( GENERAL is already checked to be 0 by the file reader )
+            {
+                const std::size_t setCount = moxFILE.value().sets.size();
+                std::vector<std::string> owner(setCount);
+                for(const auto& pset : moxFILE.value().sets)
+                {
+                    const std::uint32_t index = pset.second.index;
+                    if(index >= setCount)
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to setup the GraphPass -> {} , the SET_INDEX of the set {} is {} , but the file has {} sets : the indices have to be 0 .. {} without gaps" , passName , pset.first , index , setCount , setCount - 1)});
+                    }
+
+                    if(!owner[index].empty())
+                    {
+                        return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to setup the GraphPass -> {} , the sets {} and {} have the same SET_INDEX {} : the indices have to be 0 .. {} without repeats" , passName , owner[index] , pset.first , index , setCount - 1)});
+                    }
+                    owner[index] = pset.first;
+                }
+            }
+
             for(auto& pset : moxFILE.value().sets)
             {
                 if(pset.first == DescriptorFile::_moxGeneralSet)
@@ -550,6 +590,8 @@ namespace mox
                     for(auto& binding : pset.second.attachments) 
                     {
                         // the rule : GENERAL contains only buffers and images , samplers and TLAS live in SourceCluster
+                        
+
                         if(binding.second.type == VK_DESCRIPTOR_TYPE_SAMPLER || binding.second.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
                         {
                             return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to setup the GraphPass , the GENERAL set can not contain a SAMPLER or an AS ( they belong to a SourceCluster ) , attachment -> {}" , binding.second.name)});
@@ -571,11 +613,31 @@ namespace mox
                             generalAttachments.insert({binding.second.name , {res}});
                         }
                     }
+                    __hasGeneralSet = true;
                 }
                 else
                 {
                     cSources.insert({pset.first , {.source = nullptr , .index = pset.second.index}});
                 }
+
+                // the index is checked above : it is always inside of __dbNames and it is never used twice
+                __dbNames[pset.second.index] = pset.first;
+            }
+
+            __dbSet.resize(moxFILE.value().sets.size());
+            __dbBindingInfo.resize(__dbSet.size());
+            __doffsets = std::vector<VkDeviceSize>(__dbBindingInfo.size() , 0);
+            for(auto& b : __dbBindingInfo)
+            {
+                b.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                b.pNext = nullptr;
+                b.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                b.address = 0;
+            }
+
+            for(uint32_t i = 0 ; i < __dbBindingInfo.size() ; i++)
+            {
+                __dsets.push_back(i);
             }
 
             return {};
@@ -727,7 +789,7 @@ namespace mox
         {
             try{
                 if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create general layout , since the moxFILE isnt being created , graph name -> {}" , passName)});
-
+                if(!__hasGeneralSet) return {};
                 const auto setIt = moxFILE->sets.find(DescriptorFile::_moxGeneralSet);
                 if(setIt == moxFILE->sets.end()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create general layout , since the file has no GENERAL set , graph name -> {}" , passName)});
 
@@ -762,16 +824,15 @@ namespace mox
 
         // creation for Descriptor Buffer2
         // 1 buffer , or 2 for ping pong : the buffer number id is used in the frames with frameIndex % 2 == id , and it holds the resources which _implResolveName gives for that parity
-        MOX_NO_DISCARD ErrorDataOutput<std::vector<pDescriptorBuffer2>> _implCreateDescriptorBuffers(DescriptorLayout* layout) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<std::vector<pDescriptorBuffer2>> _implCreateDescriptorBuffers(DescriptorLayout* layout) noexcept __attribute__((nonnull))
         {
-            if(!layout) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Descriptor buffers for general layout , since its nullptr , graph name -> {}" , passName)});
-
             if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Descriptor buffers for general layout , since the moxFILE isnt being created , graph name -> {}" , passName)});
 
             try{
+                if(!__hasGeneralSet) return {};
                 const uint32_t count = containsPingPong ? 2 : 1;
                 std::vector<pDescriptorBuffer2> buffers(count);
-
+                __dbG.resize(count);
                 for(uint32_t id = 0 ; id < count ; id++)
                 {
                     auto data = _implBuildGeneralDescriptorData(id);
@@ -783,6 +844,7 @@ namespace mox
                     info.layout = layout;
 
                     buffers[id] = std::make_shared<DescriptorBuffer2>(info);
+                    __dbG[id] = buffers[id].get();
                 }
 
                 return buffers;
@@ -791,6 +853,36 @@ namespace mox
             {
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create General Descriptor Buffers for GraphPass , graph name -> {}" , passName)});
             }
+        }
+
+        void _implFill__dbSet()
+        {
+            const std::uint32_t id = containsPingPong ? context->sc->frameIndex % 2 : 0;
+            [[unlikely]] if(__dbSet.empty()) __dbSet.resize(__dbBindingInfo.size());
+            for(const auto& [location , name] : __dbNames | std::views::enumerate)
+            {
+                if(name == DescriptorFile::_moxGeneralSet) // if the set IS general
+                {
+                    __dbSet[location] = __dbG[id];
+                }
+                else
+                {
+                    __dbSet[location] = cSources[name].source->requestBuffer();
+                }
+            }
+        }
+
+        void _implBindDescriptorBuffers(VkCommandBuffer& cmd , const VkPipelineBindPoint& point , PipelineLayout* layout) noexcept __attribute__((nonnull))
+        {
+            if(__dbNames.empty() && !__hasGeneralSet)  return; // if there is NO source buffers required , and NO general set
+            _implFill__dbSet();
+            for(uint32_t i = 0 ; i < __dbSet.size() ; i++)
+            {
+                __dbBindingInfo[i].address = __dbSet[i]->pBuffer;
+            }
+
+            cmdBindDescriptorBuffersEXT(cmd , __dbBindingInfo.size() , __dbBindingInfo.data());
+            cmdSetDescriptorBufferOffsetsEXT(cmd , point , layout->layout , 0 , __dbBindingInfo.size() , __dsets.data() , __doffsets.data());
         }
     };
 
