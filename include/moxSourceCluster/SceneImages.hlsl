@@ -49,10 +49,10 @@
 [[vk::image_format("r32f")]]
 [[vk::binding( 21   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float> objectAOImage;
 
-[[vk::image_format("rg32f")]]
-[[vk::binding( 22   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float2> shadowImage;
-[[vk::image_format("rg32f")]]
-[[vk::binding( 23   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float2> prevShadowImage;
+[[vk::image_format("r32f")]]
+[[vk::binding( 22   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float> shadowImage;
+[[vk::image_format("r32f")]]
+[[vk::binding( 23   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float> prevShadowImage;
 [[vk::image_format("r32f")]]
 [[vk::binding( 24   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float> ambientImage;
 [[vk::image_format("r32f")]]
@@ -82,4 +82,14 @@
 [[vk::binding( 36   ,   MOX_SCENE_IMAGES_INCLUDED   )]] Texture2D HiZImage;
 // 1D LUT over the roughness ( the coordinate 0 .. 1 ) , R16_SFLOAT : the value is in .x . sample it with a CLAMP sampler
 [[vk::binding( 37   ,   MOX_SCENE_IMAGES_INCLUDED   )]] Texture1D MultiScatterRoughness;
+
+// temporary images for the passes , no ping pong
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 38   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> tmpDiffuseImage;
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 39   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> tmpSpecularImage;
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 40   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> diffuseHistoryImage;
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 41   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> specularHistoryImage;
 #endif

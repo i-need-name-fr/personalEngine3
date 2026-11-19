@@ -11,7 +11,7 @@
 #include <sl_reflex.h>        // Reflex (сам включает sl_pcl.h)
 #include <sl_pcl.h>           // маркеры PCL
 #include <sl_security.h>      
-#include "../logger/logger.hpp"
+#include "../../logger/logger.hpp"
 
 #define SetTypicalOperators(type) type() = delete ;type(const type& input) = delete; type(type& input) = delete; type& operator=(type& input) = delete; type& operator=(const type& input) = delete;
 #define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}

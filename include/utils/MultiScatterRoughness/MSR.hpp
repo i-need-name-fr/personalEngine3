@@ -1,9 +1,9 @@
 #pragma once
 
 
-#include "../../Image2/RenderImage2.hpp"
+#include "../../Vulkan/Image2/RenderImage2.hpp"
 #include <filesystem>
-#include "../../ShaderPipe2/ShaderPipe2.hpp"
+#include "../../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 namespace mox
 {
 namespace utils

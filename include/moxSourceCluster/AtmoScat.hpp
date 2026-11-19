@@ -1,9 +1,9 @@
 #pragma once
 
 #include "../shaderStructures/shaderStructure.h"
-#include "../Sampler/Sampler.hpp"
-#include "../Image2/RenderImage2.hpp"
-#include "../Image2/Skybox2.hpp"
+#include "../Vulkan/Sampler/Sampler.hpp"
+#include "../Vulkan/Image2/RenderImage2.hpp"
+#include "../Vulkan/Image2/Skybox2.hpp"
 #include "SourceCluster.hpp"
 
 namespace mox

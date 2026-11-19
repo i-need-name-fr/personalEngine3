@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Window.hpp"
-#include "../shaderStructures/shaderStructure.h"
+#include "../../shaderStructures/shaderStructure.h"
 
 namespace mox{
     class Player{

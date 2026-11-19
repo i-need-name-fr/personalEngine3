@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
-#include "../DescriptorLayout/DescriptorLayout.hpp"
+#include "../Vulkan/DescriptorBuffer2/DescriptorBuffer2.hpp"
+#include "../Vulkan/DescriptorLayout/DescriptorLayout.hpp"
 #include <any>
-#include "../Image2/MultiViewImage2.hpp"
+#include "../Vulkan/Image2/MultiViewImage2.hpp"
 #include <functional>
 #include <typeindex>
 // general idea of that class for NodePass to get dlayout and dbuffers if it uses not only General one 

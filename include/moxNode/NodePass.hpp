@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
-#include "../DescriptorLayout/DescriptorLayout.hpp"
+#include "../Vulkan/DescriptorBuffer2/DescriptorBuffer2.hpp"
+#include "../Vulkan/DescriptorLayout/DescriptorLayout.hpp"
 #include <any>
 #include <unordered_set>
 #include "../moxSourceCluster/SourceCluster.hpp"
-#include "../ShaderPipe2/ShaderPipe2.hpp"
+#include "../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 #include <typeindex>
 namespace mox
 {

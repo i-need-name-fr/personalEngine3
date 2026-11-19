@@ -9,10 +9,10 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "../shaderStructures/shaderStructure.h"
+#include "../../shaderStructures/shaderStructure.h"
 
 #include <iostream>
-#include "../logger/logger.hpp"
+#include "../../logger/logger.hpp"
 
 #include <memory>
 

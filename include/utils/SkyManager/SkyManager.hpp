@@ -2,7 +2,7 @@
 
 #include "../../moxSourceCluster/AtmoScat.hpp"
 #include "../../moxSourceCluster/SceneBuffers.hpp"
-#include "../../ShaderPipe2/ShaderPipe2.hpp"
+#include "../../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 
 namespace mox
 {

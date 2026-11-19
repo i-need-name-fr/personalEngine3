@@ -1,7 +1,7 @@
 #pragma once
 
 #include "SourceCluster.hpp"
-#include "../Image2/MultiViewImage2.hpp"
+#include "../Vulkan/Image2/MultiViewImage2.hpp"
 #include "../utils/MultiScatterRoughness/MSR.hpp"
 
 namespace mox
@@ -106,6 +106,12 @@ namespace Source
         Image::pRenderImage2 motionVector; // done
         Image::pRenderImage2 viewImage; // done
 
+        // temporary images for the passes ( denoisers and so on ) , one image each , no ping pong
+        Image::pRenderImage2 tmpDiffuseImage;
+        Image::pRenderImage2 tmpSpecularImage;
+        Image::pRenderImage2 diffuseHistoryImage;
+        Image::pRenderImage2 specularHistoryImage;
+
         Image::pMultiViewImage2<8 , Image::ViewPerType::Mip> HiZImage{nullptr};
 
         static constexpr uint32_t multiScatterRoughnessSize = 512;
@@ -122,14 +128,16 @@ namespace Source
 
             const uint32_t id = static_cast<uint32_t>(context->sc->frameIndex % 2);
 
-            const std::array<Image::RenderImage2* , 23> images = {
+            const std::array<Image::RenderImage2* , 27> images = {
                 // the current half of the ping pong images
                 positionImage[id].get() , normalImage[id].get() , depthImage[id].get() , diffuseImage[id].get() , diffuseDistance[id].get() ,
                 specularImage[id].get() , specularDistance[id].get() , indirectImage[id].get() , indirectDistance[id].get() ,
                 shadowImage[id].get() , ambientImage[id].get() , HDRImage[id].get() ,
                 // the images without a pair
                 albedoImage.get() , roughnessImage.get() , metallicImage.get() , objectAOImage.get() , fShadowImage.get() , fAmbientImage.get() ,
-                finalImage.get() , motionVector.get() , viewImage.get() , guiImage.get() , guiCleanImage.get()
+                finalImage.get() , motionVector.get() , viewImage.get() , guiImage.get() , guiCleanImage.get() ,
+                // the temporary and the history images
+                tmpDiffuseImage.get() , tmpSpecularImage.get() , diffuseHistoryImage.get() , specularHistoryImage.get()
             };
 
             // one barrier for all the images : translateImage / translateImageUndefined also keep the state of the image
@@ -185,6 +193,10 @@ namespace Source
         void processDelete() noexcept
         {
             viewImage = nullptr;
+            tmpDiffuseImage = nullptr;
+            tmpSpecularImage = nullptr;
+            diffuseHistoryImage = nullptr;
+            specularHistoryImage = nullptr;
             pixelCheck = nullptr;
             motionVector = nullptr;
             finalImage = nullptr;
@@ -254,6 +266,10 @@ namespace Source
                 specularImage[1] = std::make_shared<Image::RenderImage2>(info);
 
                 albedoImage = std::make_shared<Image::RenderImage2>(info);
+                tmpDiffuseImage = std::make_shared<Image::RenderImage2>(info);
+                tmpSpecularImage = std::make_shared<Image::RenderImage2>(info);
+                diffuseHistoryImage = std::make_shared<Image::RenderImage2>(info);
+                specularHistoryImage = std::make_shared<Image::RenderImage2>(info);
 
                 HDRImage[0] = std::make_shared<Image::RenderImage2>(info);
                 HDRImage[1] = std::make_shared<Image::RenderImage2>(info);
@@ -288,18 +304,15 @@ namespace Source
                 metallicImage = std::make_shared<Image::RenderImage2>(info);
                 pixelCheck = std::make_shared<Image::RenderImage2>(info);
 
-                // the shadow has 2 channels : R is the shadow ( the clear value is 1 : no shadow ) , G is the number of the frames of the history ( 0 at the start ) , like in FrameTargets
-                // the other images after it have one channel , so only R of the clear value matters for them
+                // all the images after it have one channel , R is the value ( for the shadow the clear value is 1 : no shadow )
                 info.clear.float32[0] = 1.0f;
                 info.clear.float32[1] = 0.0f;
                 info.clear.float32[2] = 0.0f;
                 info.clear.float32[3] = 0.0f;
 
-                info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
+                info.imageFormat = VK_FORMAT_R32_SFLOAT;
                 shadowImage[0] = std::make_shared<Image::RenderImage2>(info);
                 shadowImage[1] = std::make_shared<Image::RenderImage2>(info);
-
-                info.imageFormat = VK_FORMAT_R32_SFLOAT;
                 ambientImage[0] = std::make_shared<Image::RenderImage2>(info);
                 ambientImage[1] = std::make_shared<Image::RenderImage2>(info);
                 fShadowImage = std::make_shared<Image::RenderImage2>(info);
@@ -464,6 +477,26 @@ namespace Source
                 }
 
                 {
+                    const auto result = _implAddSource(tmpDiffuseImage.get() , "tmpDiffuseImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
+                    const auto result = _implAddSource(tmpSpecularImage.get() , "tmpSpecularImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
+                    const auto result = _implAddSource(diffuseHistoryImage.get() , "diffuseHistoryImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
+                    const auto result = _implAddSource(specularHistoryImage.get() , "specularHistoryImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
                     const auto result = _implAddSource(HiZImage.get() , "HiZImage");
                     if(!result.has_value()) return result;
                 }
@@ -513,7 +546,7 @@ namespace Source
                 dbuffers.resize(2);
                 for(const auto& id : {0 , 1})
                 {
-                    std::vector<DescriptorData2> data(38);
+                    std::vector<DescriptorData2> data(42);
                     data[0] = DescriptorData2::createData(positionImage[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                     data[1] = DescriptorData2::createData(positionImage[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
 
@@ -567,6 +600,10 @@ namespace Source
                     data[35] = DescriptorData2::createData(viewImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 35 , 0);
                     data[36] = DescriptorData2::createData(HiZImage->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 36 , 0);
                     data[37] = DescriptorData2::createData(MultiScatterRoughness.get() , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 37 , 0);
+                    data[38] = DescriptorData2::createData(tmpDiffuseImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 38 , 0);
+                    data[39] = DescriptorData2::createData(tmpSpecularImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 39 , 0);
+                    data[40] = DescriptorData2::createData(diffuseHistoryImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 40 , 0);
+                    data[41] = DescriptorData2::createData(specularHistoryImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 41 , 0);
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -587,7 +624,7 @@ namespace Source
         {
             try
             {
-                std::vector<DescriptorLayoutData> data(38);
+                std::vector<DescriptorLayoutData> data(42);
                 for(auto& d : data)
                 {
                     d = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1};

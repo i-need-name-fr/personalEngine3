@@ -2,7 +2,7 @@
 
 #include "../vulkanContext/moxContext2.hpp"
 #include <filesystem>
-#include "../DXC/DXCManager.hpp"
+#include "../../DXC/DXCManager.hpp"
 
 namespace mox{
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../moxSourceCluster/SourceCluster.hpp"
-#include "../AS2/TLAS2.hpp"
+#include "../Vulkan/AS2/TLAS2.hpp"
 #include "../moxSourceCluster/LightHub.hpp"
 #include "../moxSourceCluster/TextureHub.hpp"
 #include <span>

@@ -3,7 +3,7 @@
 #include "../vulkanContext/moxContext2.hpp"
 #include <filesystem>
 #include "../DescriptorLayout/DescriptorLayout.hpp"
-#include "../DXC/DXCManager.hpp"
+#include "../../DXC/DXCManager.hpp"
 
 namespace mox{
 

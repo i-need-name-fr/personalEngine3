@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Image2/Textures2.hpp"
-#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
-#include "../DescriptorLayout/DescriptorLayout.hpp"
+#include "../Vulkan/Image2/Textures2.hpp"
+#include "../Vulkan/DescriptorBuffer2/DescriptorBuffer2.hpp"
+#include "../Vulkan/DescriptorLayout/DescriptorLayout.hpp"
 #include "SourceCluster.hpp"
 namespace mox{
 namespace Source{
