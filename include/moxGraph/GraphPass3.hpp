@@ -67,6 +67,34 @@ namespace mox
     inline static std::string const moxGraphRenderGeneralSet = "__MX_DSET_GENERAL_SET__"; // this is 
     inline static std::string const moxGraphPassDefaultName = "__MX_GRAPH_P3_DEFAULT_NAME__";
 
+    template<const std::type_info& type>
+    requires (type == typeid(Image::RenderImage2*))
+    Image::RenderImage2* convertToOrigin(moxGraphPassResource &data) noexcept
+    {
+        return std::any_cast<Image::RenderImage2*>(data.data);
+    }
+
+    template<const std::type_info& type>
+    requires (type == typeid(Image::Skybox2*))
+    Image::Skybox2* convertToOrigin(moxGraphPassResource &data) noexcept
+    {
+        return std::any_cast<Image::Skybox2*>(data.data);
+    }
+
+    template<const std::type_info& type>
+    requires (type == typeid(Image::Texture2*))
+    Image::Texture2* convertToOrigin(moxGraphPassResource &data) noexcept 
+    {
+        return std::any_cast<Image::Texture2*>(data.data);
+    }
+
+    template<const std::type_info& type>
+    requires (type == typeid(Buffer::BufferBase2*))
+    Buffer::BufferBase2* convertToOrigin(moxGraphPassResource &data) noexcept
+    {
+        return std::any_cast<Buffer::BufferBase2*>(data.data);
+    }
+
     class GraphPass3
     {
     public:

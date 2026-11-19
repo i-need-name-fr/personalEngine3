@@ -2,6 +2,7 @@
 
 #include "SourceCluster.hpp"
 #include "../Image2/MultiViewImage2.hpp"
+#include "../utils/MultiScatterRoughness/MSR.hpp"
 
 namespace mox
 {
@@ -24,10 +25,19 @@ namespace Source
             processDelete();
         }
 
-        explicit SceneImages(moxContext2* context) : SourceCluster(context , "SceneImages")
+        struct CreateInfo 
+        {
+            moxContext2* context{nullptr};
+            std::filesystem::path MSR_path{moxUndefinedBehavior};
+            // will add later translate the depth buffer to HiZ image and generate mips
+            std::filesystem::path HiZ_mips;
+            std::filesystem::path HiZ_translate;
+        };
+
+        explicit SceneImages(const CreateInfo& info) : SourceCluster(info.context , "SceneImages")
         {
             {
-                const auto result = _implInit();
+                const auto result = _implInit(info);
                 if(!result.has_value())
                 {
                     engineLogger(result);
@@ -94,14 +104,9 @@ namespace Source
 
         Image::pMultiViewImage2<8 , Image::ViewPerType::Mip> HiZImage{nullptr};
 
-        // a 1D LUT over the roughness ( the coordinate is the roughness , 0 .. 1 ) for the multiple scattering of the specular lobe : the average albedo of the BRDF for a roughness
-        // ( the energy that a single scattering loses ) . it is made once : a compute pass writes it ( STORAGE_BIT ) , the lighting reads it ( Texture1D , binding 37 ) , it is NOT cleared in cleanImages
-        // the sampler for it has to CLAMP : with the REPEAT sampler of the TextureHub the roughness 1.0 would blend with the roughness 0
-        static constexpr uint32_t multiScatterRoughnessSize = 128;
+        static constexpr uint32_t multiScatterRoughnessSize = 512;
         Image::pRenderImage2 MultiScatterRoughness{nullptr};
 
-        // the barrier for a RANGE of the mips of HiZImage ( the build of the pyramid : mip i is written , then it is read to make mip i + 1 ) . the state of every mip is kept separately ,
-        // so a barrier for [ mipIndex , mipIndex + mipCount ) changes only those mips . requestBarrier( "HiZImage" , ... ) is the same for ALL the mips
         MOX_NO_DISCARD VkImageMemoryBarrier2 requestHiZBarrier(const VkPipelineStageFlags2 stage , const VkAccessFlags2 access , const uint32_t mipCount , const uint32_t mipIndex) noexcept
         {
             return HiZImage->translateImage(access , stage , mipCount , mipIndex);
@@ -208,7 +213,7 @@ namespace Source
         }
 
 
-        MOX_NO_DISCARD ErrorDataOutput<void> _implInit() noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> _implInit(const CreateInfo& input) noexcept
         {
             try
             {
@@ -465,6 +470,13 @@ namespace Source
             catch(std::exception&e)
             {
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create SceneImages , please check the logs"});
+            }
+
+            // here the MSR is created
+
+            {
+                const auto result = utils::MSR::Execute(context , MultiScatterRoughness.get() , input.MSR_path);
+                MOX_CHECK_RESULT(result)
             }
 
             return {};
