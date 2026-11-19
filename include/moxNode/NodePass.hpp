@@ -67,28 +67,28 @@ namespace mox
     inline static std::string const moxNodeRenderGeneralSet = "__MX_DSET_GENERAL_SET__"; // this is 
     inline static std::string const moxNodePassDefaultName = "__MX_GRAPH_P3_DEFAULT_NAME__";
 
-    template<const std::type_info& type>
+    template<const std::type_index& type>
     requires (type == typeid(Image::RenderImage2*))
     Image::RenderImage2* convertToOrigin(moxNodePassResource &data) noexcept
     {
         return std::any_cast<Image::RenderImage2*>(data.data);
     }
 
-    template<const std::type_info& type>
+    template<const std::type_index& type>
     requires (type == typeid(Image::Skybox2*))
     Image::Skybox2* convertToOrigin(moxNodePassResource &data) noexcept
     {
         return std::any_cast<Image::Skybox2*>(data.data);
     }
 
-    template<const std::type_info& type>
+    template<const std::type_index& type>
     requires (type == typeid(Image::Texture2*))
     Image::Texture2* convertToOrigin(moxNodePassResource &data) noexcept 
     {
         return std::any_cast<Image::Texture2*>(data.data);
     }
 
-    template<const std::type_info& type>
+    template<const std::type_index& type>
     requires (type == typeid(Buffer::BufferBase2*))
     Buffer::BufferBase2* convertToOrigin(moxNodePassResource &data) noexcept
     {
@@ -118,6 +118,16 @@ namespace mox
         MOX_NO_DISCARD ErrorDataOutput<std::vector<moxNodePassRequest>> sendRequest() noexcept
         {
             return _implSendRequestGR3();
+        }
+
+        const bool is_complete() const noexcept
+        {
+            return completedInit;
+        }
+
+        void mark_completed() noexcept
+        {
+            completedInit = true;
         }
 
         // processFeedback
@@ -186,8 +196,7 @@ namespace mox
         // one for all attachments from general Set
         std::unordered_map<std::string , moxNodePassResource> generalAttachments{};
         std::unordered_map<std::string , moxNodePassAlternativeSource> cSources{};
-        std::vector<std::optional<moxDynamicBarrier>> _dBarrier{}; // 1 element , or 2 for ping pong , chosen by frameIndex % 2
-
+        bool completedInit = false;
         // init 
 
         MOX_NO_DISCARD ErrorDataOutput<void> initFile(const std::filesystem::path& path) noexcept
@@ -316,6 +325,7 @@ namespace mox
         std::vector<VkDeviceSize> __doffsets{};
         std::vector<std::string> __dbNames{}; // instruction to which db bind and at which position
         std::vector<VkDescriptorBufferBindingInfoEXT> __dbBindingInfo{};
+        std::vector<std::optional<moxDynamicBarrier>> _dBarrier{}; // 1 element , or 2 for ping pong , chosen by frameIndex % 2
         bool __hasGeneralSet{false};
 
         moxNodeBindingType _implTransferTypeToData(const VkDescriptorType type) const noexcept

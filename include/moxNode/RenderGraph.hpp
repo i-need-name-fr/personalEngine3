@@ -204,77 +204,82 @@ namespace mox
 
             // now we have to find all the requested Attachments and Sources 
 
+            if(!pass->is_complete())
             {
-                const auto requestResult = pass->sendRequest();
-                if(!requestResult.has_value()) return std::unexpected(requestResult.error());
-                const auto& request = requestResult.value();
-                std::vector<moxNodeRenderFeedback> fd;
-                fd.reserve(request.size());
-                for(const auto& rq : request)
                 {
-                    // request can be 2 types , from general buffer of GR , or from source cluster
-                    if(rq.requestType == moxNodePassRequestSet)
+                    const auto requestResult = pass->sendRequest();
+                    if(!requestResult.has_value()) return std::unexpected(requestResult.error());
+                    const auto& request = requestResult.value();
+                    std::vector<moxNodeRenderFeedback> fd;
+                    fd.reserve(request.size());
+                    for(const auto& rq : request)
                     {
-
-                        if(rq.name == moxNodeRenderGeneralSet) continue;
-
-                        const auto it = clusters.find(rq.name); // Cluster cannot have nullptr , since there is a check in adding the source
-                        if(it == clusters.end())
+                        // request can be 2 types , from general buffer of GR , or from source cluster
+                        if(rq.requestType == moxNodePassRequestSet)
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process NodePass creation , name -> {} , since the cluster requested - doesnt exist , Cluster Source Requested -> {}" , name , rq.name)});
-                        }
 
-                        moxNodeRenderFeedback data{};
-                        data.type = moxNodePassRequestSet;
-                        data.name = rq.name;
-                        data.set = it->second;
-                        data.attachment = {};
+                            if(rq.name == moxNodeRenderGeneralSet) continue;
 
-                        fd.push_back(data);
-                    }   
-                    else if(rq.requestType == moxNodePassRequestAttachment)
-                    {
-                        if(!generalBuffer.contains(rq.name)) // attachment doesnt exist in the general buffer of GR
+                            const auto it = clusters.find(rq.name); // Cluster cannot have nullptr , since there is a check in adding the source
+                            if(it == clusters.end())
+                            {
+                                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process NodePass creation , name -> {} , since the cluster requested - doesnt exist , Cluster Source Requested -> {}" , name , rq.name)});
+                            }
+
+                            moxNodeRenderFeedback data{};
+                            data.type = moxNodePassRequestSet;
+                            data.name = rq.name;
+                            data.set = it->second;
+                            data.attachment = {};
+
+                            fd.push_back(data);
+                        }   
+                        else if(rq.requestType == moxNodePassRequestAttachment)
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment not existing , attachment name -> {}" , name , rq.name)});
+                            if(!generalBuffer.contains(rq.name)) // attachment doesnt exist in the general buffer of GR
+                            {
+                                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment not existing , attachment name -> {}" , name , rq.name)});
+                            }
+
+                            // now we check the type
+                            const auto& contained = generalBuffer.at(rq.name);
+                            if(contained.type != rq.bindingType) // the type isnt the same as the provided one
+                            {
+                                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment being different type , attachment name -> {}" , name , rq.name)});
+                            }
+
+                            moxNodeRenderFeedback data{};
+                            data.type = moxNodePassRequestAttachment;
+                            data.name = rq.name;
+                            data.attachment = contained.source;
+                            data.set = nullptr;
+
+                            fd.push_back(data);
                         }
-
-                        // now we check the type
-                        const auto& contained = generalBuffer.at(rq.name);
-                        if(contained.type != rq.bindingType) // the type isnt the same as the provided one
-                        {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment being different type , attachment name -> {}" , name , rq.name)});
-                        }
-
-                        moxNodeRenderFeedback data{};
-                        data.type = moxNodePassRequestAttachment;
-                        data.name = rq.name;
-                        data.attachment = contained.source;
-                        data.set = nullptr;
-
-                        fd.push_back(data);
+                        else return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze the requested NodePass , since the request type is undefined , pass -> {}" , name)});
                     }
-                    else return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze the requested NodePass , since the request type is undefined , pass -> {}" , name)});
+
+                    {
+                        const auto result = pass->analyzeFeedBack(fd);
+                        if(!result.has_value()) return result;
+                    }
+
+                    {
+                        const auto result = pass->initPass();
+                        if(!result.has_value()) return result;
+                    }
                 }
 
-                {
-                    const auto result = pass->analyzeFeedBack(fd);
-                    if(!result.has_value()) return result;
-                }
+                pass->mark_completed();
+            }
 
-                {
-                    const auto result = pass->initPass();
-                    if(!result.has_value()) return result;
-                }
-
-                if(graphs.contains(path))
-                {
-                    graphs[path].push_back(pass);
-                }
-                else
-                {
-                    graphs.insert({path , {pass}});
-                }
+            if(graphs.contains(path))
+            {
+                graphs[path].push_back(pass);
+            }
+            else
+            {
+                graphs.insert({path , {pass}});
             }
 
             return {};
