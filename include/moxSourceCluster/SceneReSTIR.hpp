@@ -105,7 +105,7 @@ namespace Source
                         std::array<VkBufferMemoryBarrier2 , 4> barriers{};
                         for(size_t i = 0 ; i < all.size() ; i++)
                         {
-                            // translateBuffer also keeps the state of the buffer : the first barrier of GraphPass3 will start from the transfer write
+                            // translateBuffer also keeps the state of the buffer : the first barrier of NodePass will start from the transfer write
                             barriers[i] = all[i]->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
                         }
 

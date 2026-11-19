@@ -6,13 +6,13 @@
 #include "../Image2/MultiViewImage2.hpp"
 #include <functional>
 #include <typeindex>
-// general idea of that class for GraphPass to get dlayout and dbuffers if it uses not only General one 
+// general idea of that class for NodePass to get dlayout and dbuffers if it uses not only General one 
 
 namespace mox
 {
 
     // an attachment with PING_PONG_REQUIRED: 1 is written in the .mox file only once ( positionImage ) , but in the sources there are always TWO of them : positionImage_0 and positionImage_1
-    // GraphPass3 and the one who fills the sources have to use this function , so the names always match
+    // NodePass and the one who fills the sources have to use this function , so the names always match
     inline std::string moxPingPongName(const std::string& baseName , const uint32_t index) noexcept
     {
         return baseName + "_" + std::to_string(index);
@@ -20,7 +20,7 @@ namespace mox
 
     // which of the two resources ( _0 or _1 ) an attachment uses in the frame with the parity frameParity ( frameIndex % 2 )
     // pingPongCurrent is PING_PONG_CURRENT from the .mox file : 1 is the "next" one = the one which is written in this frame , 0 is the "prev" one = the other one
-    // the barriers , the descriptor buffers of GraphPass3 and the descriptor buffers of a SourceCluster HAVE to use only this function
+    // the barriers , the descriptor buffers of NodePass and the descriptor buffers of a SourceCluster HAVE to use only this function
     inline uint32_t moxPingPongIndex(const uint32_t frameParity , const uint32_t pingPongCurrent) noexcept
     {
         return (frameParity + 1u + pingPongCurrent) % 2u;

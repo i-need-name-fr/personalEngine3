@@ -1,38 +1,38 @@
 #pragma once
 
-#include "GraphPass3.hpp"
+#include "NodePass.hpp"
 
 namespace mox
 {
 
-    struct moxGraphRenderParameter
+    struct moxNodeRenderParameter
     {
         std::any source{};
-        moxGraphBindingType type{};
+        moxNodeBindingType type{};
     };
 
     template<typename T>
     concept _isPointer_ = std::is_pointer_v<T>;
 
     template<typename T>
-    concept _moxGraphRenderType_ = _isPointer_<T> && (std::is_same_v<T , Image::RenderImage2*> || std::is_same_v<T , Image::Texture2*> || std::is_same_v<T , Image::Skybox2*> || std::is_same_v<T , Buffer::BufferBase2*>);
+    concept _moxNodeRenderType_ = _isPointer_<T> && (std::is_same_v<T , Image::RenderImage2*> || std::is_same_v<T , Image::Texture2*> || std::is_same_v<T , Image::Skybox2*> || std::is_same_v<T , Buffer::BufferBase2*>);
 
-    class GraphRender3 final
+    class RenderGraph final
     {
     public:
 
-        GraphRender3() = default;
-        GraphRender3(GraphRender3& input) = delete;
-        GraphRender3(const GraphRender3& input) = delete;
-        GraphRender3& operator=(GraphRender3& input) = delete;
-        GraphRender3& operator=(const GraphRender3& input) = delete;
+        RenderGraph() = default;
+        RenderGraph(RenderGraph& input) = delete;
+        RenderGraph(const RenderGraph& input) = delete;
+        RenderGraph& operator=(RenderGraph& input) = delete;
+        RenderGraph& operator=(const RenderGraph& input) = delete;
 
-        GraphRender3(GraphRender3&& input) noexcept
+        RenderGraph(RenderGraph&& input) noexcept
         {
             processCopy(std::move(input));
         }
 
-        GraphRender3& operator=(GraphRender3&& input) noexcept
+        RenderGraph& operator=(RenderGraph&& input) noexcept
         {
             if(this == &input) return *this;
             processCopy(std::move(input));
@@ -40,7 +40,7 @@ namespace mox
         }
 
         template<typename T>
-        requires _moxGraphRenderType_<T>
+        requires _moxNodeRenderType_<T>
         MOX_NO_DISCARD ErrorDataOutput<void> bindSource(T source , const std::string name) noexcept 
         {
             return _implBindSource(source , name);
@@ -51,9 +51,9 @@ namespace mox
             return _implBindCluster(source);
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<void> bindGraphPass3(GraphPass3* pass , const std::string& name) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> bindNodePass(NodePass* pass , const std::string& name) noexcept
         {
-            return _implProcessGraphPass3(pass , name);
+            return _implProcessNodePass(pass , name);
         }
 
         MOX_NO_DISCARD ErrorDataOutput<void> executePath(VkCommandBuffer &cmd , const std::string& path) noexcept
@@ -63,7 +63,7 @@ namespace mox
 
     private:
 
-        void processCopy(GraphRender3&& input) noexcept
+        void processCopy(RenderGraph&& input) noexcept
         {
             processDelete();
             graphs = std::move(input.graphs);
@@ -78,14 +78,14 @@ namespace mox
             clusters.clear();
         }
 
-        std::unordered_map<std::string , std::vector<GraphPass3*>> graphs{};
-        std::unordered_map<std::string , moxGraphRenderParameter> generalBuffer{};
+        std::unordered_map<std::string , std::vector<NodePass*>> graphs{};
+        std::unordered_map<std::string , moxNodeRenderParameter> generalBuffer{};
         std::unordered_map<std::string ,SourceCluster*> clusters{};
 
         // add source
 
         template<typename T>
-        requires _moxGraphRenderType_<T>
+        requires _moxNodeRenderType_<T>
         MOX_NO_DISCARD ErrorDataOutput<void> _implBindSource(T source , const std::string name) noexcept
         {
             try{
@@ -129,8 +129,8 @@ namespace mox
                     return {}; // if the type is the same , and it already exists
                 }
 
-                moxGraphRenderParameter data{};
-                data.type = isBuffer ? moxGraphBindingBuffer : moxGraphBindingImage;
+                moxNodeRenderParameter data{};
+                data.type = isBuffer ? moxNodeBindingBuffer : moxNodeBindingImage;
                 data.source = source;
 
                 generalBuffer.insert({name , std::move(data)});
@@ -171,34 +171,34 @@ namespace mox
             clusters.insert(std::pair<std::string , SourceCluster*>(name , source));
             return {};
         }
-        // add graphPass
+        // add nodePass
 
-        MOX_NO_DISCARD ErrorDataOutput<void> _implProcessGraphPass3(GraphPass3* pass , const std::string &path) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> _implProcessNodePass(NodePass* pass , const std::string &path) noexcept
         {
 
             if(!pass)
             {
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process binding the GraphPass3 , since it contains the nullptr"});
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process binding the NodePass , since it contains the nullptr"});
             }   
 
             if(path.empty())
             {
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process binding the graphPass3 , since the path of which GR to use , is null"});
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process binding the nodePass , since the path of which GR to use , is null"});
             }
 
             const std::string name = pass->getPassName();
             if(name.empty())
             {
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding the graphPass3 , since the name of pass itself is empty , source -> {}" , path)});
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding the nodePass , since the name of pass itself is empty , source -> {}" , path)});
             }
 
             if(const auto pathIt = graphs.find(path); pathIt != graphs.end()) // the same pass can not be added twice to one path
             {
                 const auto& list = pathIt->second;
-                const auto found = std::find_if(list.begin() , list.end() , [&](const GraphPass3* other) -> bool {return other == pass || other->getPassName() == name;});
+                const auto found = std::find_if(list.begin() , list.end() , [&](const NodePass* other) -> bool {return other == pass || other->getPassName() == name;});
                 if(found != list.end())
                 {
-                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding the graphPass3 , since the pass already exists in the path , pass -> {} , path -> {}" , name , path)});
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding the nodePass , since the pass already exists in the path , pass -> {} , path -> {}" , name , path)});
                 }
             }
 
@@ -208,53 +208,53 @@ namespace mox
                 const auto requestResult = pass->sendRequest();
                 if(!requestResult.has_value()) return std::unexpected(requestResult.error());
                 const auto& request = requestResult.value();
-                std::vector<moxGraphRenderFeedback> fd;
+                std::vector<moxNodeRenderFeedback> fd;
                 fd.reserve(request.size());
                 for(const auto& rq : request)
                 {
                     // request can be 2 types , from general buffer of GR , or from source cluster
-                    if(rq.requestType == moxGraphPassRequestSet)
+                    if(rq.requestType == moxNodePassRequestSet)
                     {
 
-                        if(rq.name == moxGraphRenderGeneralSet) continue;
+                        if(rq.name == moxNodeRenderGeneralSet) continue;
 
                         const auto it = clusters.find(rq.name); // Cluster cannot have nullptr , since there is a check in adding the source
                         if(it == clusters.end())
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process GraphPass creation , name -> {} , since the cluster requested - doesnt exist , Cluster Source Requested -> {}" , name , rq.name)});
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process NodePass creation , name -> {} , since the cluster requested - doesnt exist , Cluster Source Requested -> {}" , name , rq.name)});
                         }
 
-                        moxGraphRenderFeedback data{};
-                        data.type = moxGraphPassRequestSet;
+                        moxNodeRenderFeedback data{};
+                        data.type = moxNodePassRequestSet;
                         data.name = rq.name;
                         data.set = it->second;
                         data.attachment = {};
 
                         fd.push_back(data);
                     }   
-                    else if(rq.requestType == moxGraphPassRequestAttachment)
+                    else if(rq.requestType == moxNodePassRequestAttachment)
                     {
                         if(!generalBuffer.contains(rq.name)) // attachment doesnt exist in the general buffer of GR
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 name -> {} , due to attachment not existing , attachment name -> {}" , name , rq.name)});
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment not existing , attachment name -> {}" , name , rq.name)});
                         }
 
                         // now we check the type
                         const auto& contained = generalBuffer.at(rq.name);
                         if(contained.type != rq.bindingType) // the type isnt the same as the provided one
                         {
-                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for GraphPass3 name -> {} , due to attachment being different type , attachment name -> {}" , name , rq.name)});
+                            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process binding for NodePass name -> {} , due to attachment being different type , attachment name -> {}" , name , rq.name)});
                         }
 
-                        moxGraphRenderFeedback data{};
-                        data.type = moxGraphPassRequestAttachment;
+                        moxNodeRenderFeedback data{};
+                        data.type = moxNodePassRequestAttachment;
                         data.name = rq.name;
                         data.attachment = contained.source;
                         data.set = nullptr;
 
                         fd.push_back(data);
                     }
-                    else return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze the requested GraphPass3 , since the request type is undefined , pass -> {}" , name)});
+                    else return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze the requested NodePass , since the request type is undefined , pass -> {}" , name)});
                 }
 
                 {
@@ -307,5 +307,5 @@ namespace mox
         }
     };
 
-    MOX_DECLARE_PTR_STRUCTURE(GraphRender3)
+    MOX_DECLARE_PTR_STRUCTURE(RenderGraph)
 }

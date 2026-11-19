@@ -198,8 +198,10 @@ namespace mox
             IDxcResult *dxcResult = nullptr;
             std::vector<LPCWSTR> flagPtrs;
             flagPtrs.reserve(flags.size());
+            
             for (const std::wstring& f : flags)
                 flagPtrs.push_back(f.c_str());
+
             HRESULT hr = compiler->Compile(&buffer,
                             flagPtrs.data(),
                             static_cast<uint32_t>(flagPtrs.size()),
