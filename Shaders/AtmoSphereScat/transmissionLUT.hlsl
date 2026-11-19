@@ -1,6 +1,8 @@
 #include "../../include/ShaderStructures/ShaderStructure.h"
 #define MOX_ATMO_SCAT_INCLUDED 0
 #include "../../include/moxSourceCluster/AtmoScat.hlsl"
+#define MOX_SCENE_BUFFERS_INCLUDED 1
+#include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 
 float raySphereIntersectNear(float3 rayOrigin , float3 rayDirection , float radius){
     float b = dot(rayOrigin , rayDirection);

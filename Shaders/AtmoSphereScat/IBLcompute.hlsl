@@ -1,7 +1,8 @@
 #include "../../include/ShaderStructures/ShaderStructure.h"
 #define MOX_ATMO_SCAT_INCLUDED 0
 #include "../../include/moxSourceCluster/AtmoScat.hlsl"
-
+#define MOX_SCENE_BUFFERS_INCLUDED 1
+#include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 
 static const uint IRRADIANCE_SIZE     = 32;
 static const uint SAMPLE_COUNT_THETA  = 32;

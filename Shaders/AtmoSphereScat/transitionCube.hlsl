@@ -1,6 +1,8 @@
 #include "../../include/ShaderStructures/ShaderStructure.h"
 #define MOX_ATMO_SCAT_INCLUDED 0
 #include "../../include/moxSourceCluster/AtmoScat.hlsl"
+#define MOX_SCENE_BUFFERS_INCLUDED 1
+#include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 
 static const float3 GROUND_COLOR = float3(0.30f , 0.28f , 0.20f);
 static const float GROUND_FADE_RANGE = 0.1f;

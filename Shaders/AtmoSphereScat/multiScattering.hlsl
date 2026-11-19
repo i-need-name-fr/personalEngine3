@@ -1,6 +1,8 @@
 #include "../../include/ShaderStructures/ShaderStructure.h"
-#define MOX_ATMO_SCAT_INCLUDED 00
+#define MOX_ATMO_SCAT_INCLUDED 0
 #include "../../include/moxSourceCluster/AtmoScat.hlsl"
+#define MOX_SCENE_BUFFERS_INCLUDED 1
+#include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 
 float RaySphereIntersectNear(float3 ro, float3 rd, float r)
 {
