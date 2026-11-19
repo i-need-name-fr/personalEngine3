@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include "../moxSourceCluster/SourceCluster.hpp"
 #include "../ShaderPipe2/ShaderPipe2.hpp"
-
+#include <typeindex>
 namespace mox
 {
     // currently The GraphPass3 is different from other passes within a simple changes
@@ -95,6 +95,7 @@ namespace mox
         return std::any_cast<Buffer::BufferBase2*>(data.data);
     }
 
+    // UPDATED: new GraphPass3 now can pass the functions,  however the user needs to transfer it to the direct type , cannot be used directly
     class GraphPass3
     {
     public:

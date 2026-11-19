@@ -4,7 +4,8 @@
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 #include <any>
 #include "../Image2/MultiViewImage2.hpp"
-
+#include <functional>
+#include <typeindex>
 // general idea of that class for GraphPass to get dlayout and dbuffers if it uses not only General one 
 
 namespace mox
@@ -30,7 +31,11 @@ namespace mox
     using moxPingPongTexture2 = std::array<Image::pTexture2 , 2>;
     using moxPingPongBufferBase2 = std::array<Buffer::BufferBase2* , 2>;
 
-
+    struct moxSourceFunction
+    {
+        std::type_index key{typeid(void)};
+        std::any function{};
+    };
 
     class SourceCluster
     {
@@ -61,6 +66,24 @@ namespace mox
             return _implAskForBarrier(name , stage , access);
         }
 
+        // FunctionType should be a std::function<> 
+        template<typename FunctionType>
+        ErrorDataOutput<FunctionType> requestFunction(const std::string name)
+        {
+            const auto it = functions.find(name);
+            if(it == functions.end())
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , std::format("failed to find relative function , function name -> {}" , name));
+            }
+
+            const auto data = it->second;
+            if(data.key != typeid(FunctionType))
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , std::format("requested function has a different type  , Function name -> {}", name));
+            }
+            return std::any_cast<FunctionType>(data.function);
+        }
+
         const std::string requestName() const noexcept {return this->name;}
 
         virtual ~SourceCluster() noexcept
@@ -83,6 +106,7 @@ namespace mox
             dlayouts = {};
             sources = {};
             context = nullptr;
+            functions.clear();
         }
 
         MOX_NO_DISCARD virtual ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept
@@ -143,6 +167,7 @@ namespace mox
         std::vector<pDescriptorBuffer2> dbuffers{}; 
         std::vector<pDescriptorLayout> dlayouts{};
         std::unordered_map<std::string , std::any> sources{};
+        std::unordered_map<std::string , moxSourceFunction> functions{};
         std::string name{};
 
         // since the SourceCluster might have multiple ping pongs , we assume that there are only 2 , since i usually make only 2 , thats why its called Pingpong
@@ -268,7 +293,7 @@ namespace mox
             return {};
         }
 
-            MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(moxPingPongBufferBase2 source , const std::string name) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<void> _implAddSource(moxPingPongBufferBase2 source , const std::string name) noexcept
         {
             {
                 const auto result = _implAddSource(source[0] , name + "_0");
@@ -279,6 +304,16 @@ namespace mox
                 const auto result = _implAddSource(source[1] , name + "_1");
                 if(!result.has_value()) return result;
             }
+            return {};
+        }
+
+        template<typename Sig>
+        MOX_NO_DISCARD ErrorDataOutput<void>_implAddFunction(std::function<Sig> function , const std::string& name) noexcept 
+        {
+            moxSourceFunction data{};
+            data.function = function;
+            data.key = typeid(std::function<Sig>);
+            functions.insert_or_assign(name,std::move(data));
             return {};
         }
     };

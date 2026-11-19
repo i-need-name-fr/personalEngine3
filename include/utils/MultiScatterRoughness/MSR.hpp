@@ -32,7 +32,7 @@ namespace utils
                 {
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
-                    info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+                    info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
                     info.pNext = nullptr;
                     info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.data = {DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1}};

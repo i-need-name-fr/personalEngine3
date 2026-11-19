@@ -25,6 +25,10 @@ namespace Source
             processDelete();
         }
 
+
+        using RecordHiZFunctionType = std::function<ErrorDataOutput<void>(VkCommandBuffer& , Image::RenderImage2*)>; 
+        inline static const std::string recordHiZFunctionName = "__recordHiZFunction__";
+
         struct CreateInfo 
         {
             moxContext2* context{nullptr};
@@ -175,6 +179,9 @@ namespace Source
             return SourceCluster::_implAskForBarrier(name , stage , access);
         }
 
+        pShaderPipe2 HiZTranslate{};
+        pShaderPipe2 HiZGenerate{};
+
         void processDelete() noexcept
         {
             viewImage = nullptr;
@@ -190,6 +197,8 @@ namespace Source
             objectAOImage = nullptr;
             albedoImage = nullptr;
             HiZImage = nullptr;
+            HiZTranslate = nullptr;
+            HiZGenerate = nullptr;
             MultiScatterRoughness = nullptr;
             for(const auto& id : { 0 ,1})
             {
@@ -479,6 +488,20 @@ namespace Source
                 MOX_CHECK_RESULT(result)
             }
 
+            // the HiZ shaders are optional : without the paths there is no HiZ pass ( the pipes stay nullptr and the record function does nothing )
+            if(!input.HiZ_translate.empty() && !input.HiZ_mips.empty())
+            {
+                {
+                    const auto result = _implCreatePipes(input);
+                    MOX_CHECK_RESULT(result)
+                }
+
+                {
+                    const auto result = _implAddFunc();
+                    MOX_CHECK_RESULT(result)
+                }
+            }
+
             return {};
         }
 
@@ -588,6 +611,211 @@ namespace Source
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create DL for SceneImages"});
             }
             return {};
+        }
+
+
+        MOX_NO_DISCARD ErrorDataOutput<void> _implCreatePipes(const CreateInfo& input) noexcept
+        {
+            try
+            {
+                {
+                    HiZTranslate = std::make_shared<ShaderPipe2>(context);
+
+                    {
+                        DescriptorLayout::CreateInfo info{};
+                        info.context = context;
+                        info.data = {{.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , .count = 1} , {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1}};
+                        // push descriptor set : the set is written right in the command buffer , no descriptor buffer for it
+                        info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+                        info.pNext = nullptr;
+                        info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                        HiZTranslate->addDescriptorLayout(info);
+                    }
+
+                    {
+                        PipelineLayout::CreateInfo info{};
+                        info.layouts = {HiZTranslate->descriptorLayouts[0].get()};
+                        info.context = context;
+                        info.ranges = {};
+
+                        HiZTranslate->layout = std::make_shared<PipelineLayout>(info);
+                    }
+
+                    {
+                        ShaderObject2::CreateInfo info{};
+                        info.context = context;
+                        info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
+                        info.nextStage = 0;
+                        info.layouts = {HiZTranslate->descriptorLayouts[0].get()};
+                        info.filePath = input.HiZ_translate.string();
+                        info.pushes = {};
+
+                        HiZTranslate->addShader(info);
+                    }
+                }
+
+                {
+                    HiZGenerate = std::make_shared<ShaderPipe2>(context);
+
+                    {
+                        DescriptorLayout::CreateInfo info{};
+                        info.context = context;
+                        info.data = {{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1} , {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1}};
+                        info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+                        info.pNext = nullptr;
+                        info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                        HiZGenerate->addDescriptorLayout(info);
+                    }
+
+                    {
+                        PipelineLayout::CreateInfo info{};
+                        info.layouts = {HiZGenerate->descriptorLayouts[0].get()};
+                        info.context = context;
+                        info.ranges = {};
+
+                        HiZGenerate->layout = std::make_shared<PipelineLayout>(info);
+                    }
+
+                    {
+                        ShaderObject2::CreateInfo info{};
+                        info.context = context;
+                        info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
+                        info.nextStage = 0;
+                        info.layouts = {HiZGenerate->descriptorLayouts[0].get()};
+                        info.filePath = input.HiZ_mips.string();
+                        info.pushes = {};
+
+                        HiZGenerate->addShader(info);
+                    }
+                }
+            }
+            catch(std::exception &e)
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create pipes , please check the logs above");
+            }
+
+            return {};
+        }
+
+        // writes the two images of a pipe ( binding 0 and binding 1 , set 0 ) right into the command buffer , both are in the layout GENERAL
+        void _implPushHiZImages(VkCommandBuffer& cmd , const ShaderPipe2* pipe , const VkDescriptorType srcType , const VkImageView src , const VkImageView dst) noexcept
+        {
+            std::array<VkDescriptorImageInfo , 2> images{};
+            images[0].sampler = nullptr;
+            images[0].imageView = src;
+            images[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            images[1].sampler = nullptr;
+            images[1].imageView = dst;
+            images[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            std::array<VkWriteDescriptorSet , 2> writes{};
+            for(uint32_t i = 0 ; i < 2 ; i++)
+            {
+                writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[i].pNext = nullptr;
+                writes[i].dstSet = nullptr; // ignored for push descriptors
+                writes[i].dstBinding = i;
+                writes[i].dstArrayElement = 0;
+                writes[i].descriptorCount = 1;
+                writes[i].pImageInfo = &images[i];
+                writes[i].pBufferInfo = nullptr;
+                writes[i].pTexelBufferView = nullptr;
+            }
+            writes[0].descriptorType = srcType;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+
+            cmdPushDescriptorSetKHR(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , static_cast<uint32_t>(writes.size()) , writes.data());
+        }
+
+        // 1) depth -> mip 0 of HiZ : binding 0 = SAMPLED_IMAGE ( the depth ) , binding 1 = STORAGE_IMAGE ( mip 0 ) , one thread per pixel , group 8 x 8
+        void _implTranslateBuffer(VkCommandBuffer& cmd , Image::RenderImage2* depth) noexcept
+        #if defined(__clang__)
+         __attribute__((nonnull))
+        #endif
+        {
+            if(!HiZTranslate || !HiZImage) return;
+
+            {
+                std::array<VkImageMemoryBarrier2 , 2> barriers{};
+                barriers[0] = depth->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+                barriers[1] = HiZImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , 0);
+                const auto dep = TypicalDependency<2>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+
+            const VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
+            VkShaderEXT shaders[1] = {HiZTranslate->shaders[0]->shader};
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+
+            _implPushHiZImages(cmd , HiZTranslate.get() , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , depth->view , HiZImage->views[0]);
+
+            vkCmdDispatch(cmd , (HiZImage->extent.width + 7) / 8 , (HiZImage->extent.height + 7) / 8 , 1);
+
+            shaders[0] = nullptr;
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+        }
+
+        // 2) mip i -> mip i + 1 , one dispatch per level : binding 0 = STORAGE_IMAGE ( the source mip , only read ) , binding 1 = STORAGE_IMAGE ( the next mip , written )
+        // the dispatch is over the size of the DESTINATION mip , group 8 x 8
+        void _implGenerateMips(VkCommandBuffer& cmd) noexcept
+        {
+            if(!HiZGenerate || !HiZImage) return;
+
+            constexpr uint32_t mipCount = 8;
+
+            const VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
+            VkShaderEXT shaders[1] = {HiZGenerate->shaders[0]->shader};
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+
+            for(uint32_t mip = 0 ; mip + 1 < mipCount ; mip++)
+            {
+                // the mip we have just written becomes the source , the next one is going to be written
+                std::array<VkImageMemoryBarrier2 , 2> barriers{};
+                barriers[0] = HiZImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , mip);
+                barriers[1] = HiZImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , mip + 1);
+                const auto dep = TypicalDependency<2>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+
+                _implPushHiZImages(cmd , HiZGenerate.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , HiZImage->views[mip] , HiZImage->views[mip + 1]);
+
+                const uint32_t width = std::max(HiZImage->extent.width >> (mip + 1) , 1u);
+                const uint32_t height = std::max(HiZImage->extent.height >> (mip + 1) , 1u);
+                vkCmdDispatch(cmd , (width + 7) / 8 , (height + 7) / 8 , 1);
+            }
+
+            shaders[0] = nullptr;
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+
+            // all the mips for everyone : the task shader reads them through the full view
+            {
+                auto barrier = HiZImage->translateWholeImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+                const auto dep = TypicalDependency<1>(&barrier);
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+        }
+
+        MOX_NO_DISCARD ErrorDataOutput<void> _implRecordHiZ(VkCommandBuffer& cmd , Image::RenderImage2* depth) noexcept
+        #if defined(__clang__)
+         __attribute__((nonnull))
+        #endif
+        {
+            if(context->user->fixedPosition) return {};
+            if(!HiZTranslate || !HiZGenerate) return {};
+
+            _implTranslateBuffer(cmd , depth);
+            _implGenerateMips(cmd);
+
+            return {};
+        }
+
+        ErrorDataOutput<void> _implAddFunc()
+        {
+            const RecordHiZFunctionType function = [&](VkCommandBuffer& cmd , Image::RenderImage2* depth) ->ErrorDataOutput<void> 
+            {
+                return _implRecordHiZ(cmd , depth);
+            };
+            return _implAddFunction(function , recordHiZFunctionName);
         }
     };
 }
