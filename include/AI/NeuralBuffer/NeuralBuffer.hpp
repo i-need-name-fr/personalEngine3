@@ -567,10 +567,10 @@ namespace Buffer
         {
 
             std::array<VkBufferMemoryBarrier2 , 4> barriers{};
-            barriers[0] = weightBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
-            barriers[1] = stagingWeightBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
-            barriers[2] = gradsBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
-            barriers[3] = stagingGradBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[0] = weightBuffer->translateBuffer(VK_ACCESS_2_MEMORY_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[1] = stagingWeightBuffer->translateBuffer(VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[2] = gradsBuffer->translateBuffer(VK_ACCESS_2_MEMORY_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[3] = stagingGradBuffer->translateBuffer(VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
 
             const auto dep = TypicalDependency<4>(barriers.data());
             vkCmdPipelineBarrier2(cmd , &dep);
@@ -583,8 +583,8 @@ namespace Buffer
         {
 
             std::array<VkBufferMemoryBarrier2 , 2> barriers{};
-            barriers[0] = weightBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
-            barriers[1] = stagingWeightBuffer->translateBuffer(VK_ACCESS_2_SHADER_STORAGE_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[0] = weightBuffer->translateBuffer(VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
+            barriers[1] = stagingWeightBuffer->translateBuffer(VK_ACCESS_2_MEMORY_READ_BIT, VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV);
 
 
             const auto dep = TypicalDependency<2>(barriers.data());
