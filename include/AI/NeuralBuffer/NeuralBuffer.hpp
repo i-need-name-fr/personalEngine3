@@ -11,13 +11,32 @@
 #include <random>
 #include <array>
 #include <vector>
+#include <string>
+#include <string_view>
 
 namespace mox
 {
 namespace Buffer
 {
-    template<std::uint32_t rows , std::uint32_t colons>
-    requires((rows % 16 ==0) && (colons % 16 == 0))
+    // a string that can be a template parameter : std::string can not ( it is not a structural type ) , a char array inside of a class can
+    // NeuralBuffer<64 , 16 , "hidden"> : N includes the zero at the end
+    template<std::size_t N>
+    struct FixedString
+    {
+        char value[N]{};
+
+        constexpr FixedString(const char (&text)[N]) noexcept
+        {
+            for(std::size_t i = 0 ; i < N ; i++) value[i] = text[i];
+        }
+
+        constexpr bool empty() const noexcept { return N <= 1 || value[0] == '\0'; }
+        constexpr std::string_view view() const noexcept { return std::string_view(value , N > 0 ? N - 1 : 0); }
+    };
+
+    // the name is the name of the files in Cache , so every NeuralBuffer must have its own
+    template<std::uint32_t rows , std::uint32_t colons , FixedString bufferName>
+    requires((rows % 16 ==0) && (colons % 16 == 0) && (!bufferName.empty()))
     class NeuralBuffer final
     {
     public:
@@ -29,7 +48,6 @@ namespace Buffer
         {
             moxContext2* _Nonnull context;
             bool needsToWriteFile{false};
-            std::string fileName{};
             // the range of the start weights . the weights must be around ZERO : an all-positive range makes the neurons almost the same
             // min >= max ( the default ) means Glorot : the range is +- sqrt( 6 / ( rows + colons ) )
             float min = 0.0f;
@@ -97,7 +115,7 @@ namespace Buffer
         inline static std::random_device rndDevice{};
         moxContext2* context{nullptr};
         std::filesystem::path weightFile{};
-        std::filesystem::path paramsFile{};
+        std::filesystem::path paramsFile{}; 
         bool saveOnDestroy{false};
         std::array<VkConvertCooperativeVectorMatrixInfoNV , 2> _toTraining{}; // from row major -> inference and training optimal
         std::array<VkConvertCooperativeVectorMatrixInfoNV , 2> _fromTraining{};
@@ -251,17 +269,20 @@ namespace Buffer
 
         void _implSaveFile(const std::vector<uint8_t>& data , const std::filesystem::path& path) const noexcept
         {
+            std::error_code error;
+            std::filesystem::create_directories(path.parent_path() , error);
+
             std::ofstream file(path , std::ios::binary);
             if(!file.is_open()) return;
             file.write(reinterpret_cast<const char*>(data.data()) , static_cast<std::streamsize>(data.size()));
         }
 
-        // two files near this header : the weights ( the buffer as it is , in the layouts of the driver ) and the parameters of Adam
-        void _implMakeFilePaths(const std::string& name) noexcept
+        void _implMakeFilePaths() noexcept
         {
+            const std::string name(bufferName.view());
             const std::filesystem::path currentDir = std::filesystem::path(std::source_location::current().file_name()).parent_path();
-            weightFile = currentDir / (name + ".txt");
-            paramsFile = currentDir / (name + "Param.txt");
+            weightFile = currentDir / std::filesystem::path("Cache") /(name + ".txt");
+            paramsFile = currentDir / std::filesystem::path("Cache") /(name + "Param.txt");
         }
 
         void _implSaveToFile() noexcept
@@ -307,25 +328,22 @@ namespace Buffer
             }
             context = input.context;
 
-            // the matrix and then the bias ( rows parameters ) : the bias needs w , m , v of Adam too
             std::vector<::AI::Parameter> params(PARAMETER_COUNT);
-            // not empty : the weights from the file , they are already in the layouts of the driver
             std::vector<uint8_t> savedWeights{};
 
             if(input.needsToWriteFile)
             {
-                if(input.fileName.empty())
-                {
-                    MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create NeuralBuffer , since needsToWriteFile is true , but the fileName is empty");
-                }
-                _implMakeFilePaths(input.fileName);
+                _implMakeFilePaths();
 
-                const auto weightData = _implReadFile(weightFile);
-                const auto paramsData = _implReadFile(paramsFile);
-                if(!weightData.empty() && !paramsData.empty())
+                if(utils::SystemCheck::similarSystem())
                 {
-                    std::memcpy(params.data() , paramsData.data() , paramsData.size());
-                    savedWeights = weightData;
+                    const auto weightData = _implReadFile(weightFile);
+                    const auto paramsData = _implReadFile(paramsFile);
+                    if(!weightData.empty() && !paramsData.empty())
+                    {
+                        std::memcpy(params.data() , paramsData.data() , paramsData.size());
+                        savedWeights = weightData;
+                    }
                 }
             }
 
@@ -578,7 +596,7 @@ namespace Buffer
 
     };
 
-    template<std::uint32_t rows , std::uint32_t columns>
-    using pNeuralBuffer = std::shared_ptr<NeuralBuffer<rows , columns>>;
+    template<std::uint32_t rows , std::uint32_t columns , FixedString bufferName>
+    using pNeuralBuffer = std::shared_ptr<NeuralBuffer<rows , columns , bufferName>>;
 }
 }

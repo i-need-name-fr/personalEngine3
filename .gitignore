@@ -4,3 +4,4 @@ log.txt
 task.txt
 ShaderModuleCache/
 PipelineCache/
+include/AI/NeuralBuffer/Cache/

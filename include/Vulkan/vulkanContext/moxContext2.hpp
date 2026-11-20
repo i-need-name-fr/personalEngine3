@@ -10,12 +10,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "../../shaderStructures/shaderStructure.h"
-
 #include <iostream>
 #include "../../logger/logger.hpp"
-
 #include <memory>
-
 #include "Instance.hpp"
 #include "FamilyDetails.hpp"
 #include "Window.hpp"
@@ -28,6 +25,7 @@
 #include "GPUMultiThread.hpp"
 #include "vmaAllocator.hpp"
 #include "JobManager.hpp"
+#include "../../AI/NeuralBuffer/SystemCheck.hpp"
 
 #define MOX_UNLIKELY [[unlikely]]
 #define MOX_LIKELY [[likely]]
@@ -276,6 +274,7 @@ namespace mox{
                 engineLogger(result);
                 THROW_MESSAGE;
             }
+            utils::SystemCheck::init(physicalDevice->device);
         }
 
         SetTypicalOperators(moxContext2)
