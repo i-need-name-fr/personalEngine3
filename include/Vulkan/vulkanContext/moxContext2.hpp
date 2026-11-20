@@ -235,6 +235,7 @@ namespace mox{
             loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
 
             loadFunction(instance , getFunctionName("PFN_vkCmdConvertCooperativeVectorMatrixNV") , cmdConvertCooperativeVectorMatrixNV);
+            loadFunction(instance , getFunctionName("PFN_vkConvertCooperativeVectorMatrixNV") , convertCooperativeVectorMatrixNV);
         }
 
         void processCopy(moxContext2&& input) noexcept{
@@ -380,8 +381,7 @@ namespace mox{
 
 
         // new feature 
-        // now we added a single use function that easily deletes all the context->queueManager->....
-        MOX_NO_DISCARD ErrorDataOutput<void> executeCommand(cmdFunctionType& function ,const  VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> executeCommand(const cmdFunctionType& function ,const  VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept
         {
             queueManager->Begin();
             queueManager->recordCmd(function , stage);

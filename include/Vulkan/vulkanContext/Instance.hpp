@@ -117,6 +117,8 @@ namespace mox{
     
     inline PFN_vkCmdDrawMeshTasksEXT cmdDrawMeshTasksEXT = nullptr;
     inline PFN_vkCmdConvertCooperativeVectorMatrixNV cmdConvertCooperativeVectorMatrixNV = nullptr;
+    // the HOST version : with dstData = nullptr it returns the size of the matrix in a layout ( no command buffer )
+    inline PFN_vkConvertCooperativeVectorMatrixNV convertCooperativeVectorMatrixNV = nullptr;
 
     inline const std::string getFunctionName(const std::string PFN_function){
         if(PFN_function.size() < 4) return {};

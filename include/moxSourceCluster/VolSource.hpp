@@ -60,7 +60,7 @@ namespace Source
     private:
 
         // requestBarrier( name , stage , access ) of the base class does not know MultiViewImage2 : the volume is the whole image ( all the layers )
-        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
+        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
         {
             if(name == "fogImageArray")
             {

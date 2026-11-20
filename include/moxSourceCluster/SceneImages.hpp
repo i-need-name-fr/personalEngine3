@@ -176,7 +176,7 @@ namespace Source
     private:
 
         // requestBarrier( name , stage , access ) of the base class knows RenderImage2 , Texture2 , Skybox2 and the buffers , but not MultiViewImage2 : HiZImage is the whole image ( all the mips )
-        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
+        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
         {
             if(name == "HiZImage")
             {

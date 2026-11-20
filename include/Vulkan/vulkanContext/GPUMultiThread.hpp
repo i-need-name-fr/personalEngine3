@@ -400,7 +400,7 @@ namespace mox{
             started = true;
         }
 
-        void recordCmd(cmdFunctionType &function , VkPipelineStageFlags dstStage) noexcept{
+        void recordCmd(const cmdFunctionType &function , VkPipelineStageFlags dstStage) noexcept{
             if(!started) Begin();
 
             work.push_back({function , dstStage});

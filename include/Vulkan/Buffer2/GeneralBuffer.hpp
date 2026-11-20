@@ -221,7 +221,7 @@ namespace Buffer{
 
         // update buffer GPU
         
-        void fillBuffer(VkCommandBuffer &cmd) noexcept requires(BufferType::Device == type && !readable){
+        void fillBuffer(VkCommandBuffer &cmd) noexcept{
             [[unlikely]] if(!cmd){
 
                 static uint32_t totalMessagesCount = 0;
@@ -398,6 +398,11 @@ namespace Buffer{
 
             barrier = translateBuffer(access , stage);
             vkCmdPipelineBarrier2(cmd , &info);
+        }
+
+        uint64_t* getPtrSize() noexcept
+        {
+            return &bufferSize;
         }
 
         ~GeneralBuffer2(){}

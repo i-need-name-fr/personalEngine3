@@ -237,7 +237,7 @@ namespace mox
             return _implCreateDBarrier(stage , frameID);
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<void> bindBarrier(VkCommandBuffer &cmd ,const VkPipelineStageFlags2 stage) noexcept
+        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> bindBarrier(VkCommandBuffer &cmd ,const VkPipelineStageFlags2 stage) noexcept
         {
             const auto result = createBarriers(stage , context->sc->frameIndex);
             if(!result.has_value()) return result;
@@ -469,7 +469,7 @@ namespace mox
         // the barriers have to be rebuilt EVERY frame : translateImage / translateBuffer change the stored state ( currentAccess , layout ) of the resource
         // _dBarrier has 1 element , or 2 if the pass has ping pong , the element is chosen by frameIndex % 2
         // the vectors are cleared , not freed , so after the first frame there are no allocations
-        MOX_NO_DISCARD ErrorDataOutput<void> _implCreateDBarrier(const VkPipelineStageFlags2 stage , const uint64_t frameIndex) noexcept
+        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> _implCreateDBarrier(const VkPipelineStageFlags2 stage , const uint64_t frameIndex) noexcept
         {
             if(!moxFILE)
             {
@@ -684,7 +684,7 @@ namespace mox
 
         uint8_t containsPingPong = false;
 
-        MOX_NO_DISCARD ErrorDataOutput<void> _implBindBarriers(VkCommandBuffer& cmd) noexcept
+        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> _implBindBarriers(VkCommandBuffer& cmd) noexcept
         {
             if(!cmd) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers , since the command buffer is nullptr"});
             if(_dBarrier.empty()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers , since the barriers are empty"});

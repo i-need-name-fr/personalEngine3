@@ -61,7 +61,7 @@ namespace mox
             return _implRequestDSLayout();
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> requestBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access ) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> requestBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access ) noexcept
         {
             return _implAskForBarrier(name , stage , access);
         }
@@ -109,11 +109,13 @@ namespace mox
             functions.clear();
         }
 
-        MOX_NO_DISCARD virtual ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept
+        MOX_NO_DISCARD virtual ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept
         {
-            if(!sources.contains(name)) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Barrier for whatever this is , name -> {}" , name)});
-            
-            const auto data = sources.at(name);
+            // one lookup , and no copy of the std::any : the reference stays valid , since the map is not changed here
+            const auto it = sources.find(name);
+            if(it == sources.end()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Barrier for whatever this is , name -> {}" , name)});
+
+            const std::any& data = it->second;
 
             if(data.type() == typeid(Image::RenderImage2*))
             {

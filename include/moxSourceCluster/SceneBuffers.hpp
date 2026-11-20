@@ -25,6 +25,9 @@ namespace Source
 
         SceneBuffers() = delete;
 
+        using RequestFeaturesFunctionType =std::function<GeneralFeatures(void)>;
+        inline static const std::string RequestFeaturesFunctionName = "__RequestFeatures__";
+
         Buffer::pDeviceReadableBuffer generalBuffer{nullptr};
         Buffer::pDeviceReadableBuffer features{nullptr};
         Buffer::pDeviceReadableBuffer sunBuffer{nullptr};
@@ -173,6 +176,14 @@ namespace Source
             {
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create SceneBuffers ( the buffers or the descriptor set )"});
             }
+
+            RequestFeaturesFunctionType function = [&]()-> GeneralFeatures
+            {
+                return features->getBuffetDataSingular<GeneralFeatures>();
+            };
+
+            const auto result = _implAddFunction(function , RequestFeaturesFunctionName);
+            MOX_CHECK_RESULT(result)
 
             return {};
         }
