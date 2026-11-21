@@ -67,6 +67,12 @@ namespace mox
     inline static std::string const moxNodeRenderGeneralSet = "__MX_DSET_GENERAL_SET__"; // this is 
     inline static std::string const moxNodePassDefaultName = "__MX_GRAPH_P3_DEFAULT_NAME__";
 
+    enum class ShaderType
+    {
+        Spatial,
+        temporal
+    };
+
     // UPDATED: new NodePass now can pass the functions,  however the user needs to transfer it to the direct type , cannot be used directly
     // GENERAL INFORMATION
     // some of the passes can ask for std::filesystem::path without file type , direction and name only 

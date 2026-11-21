@@ -539,6 +539,9 @@ struct GeneralFeatures{
     uint32_t ReSTIRGI;
     uint32_t ReSTIRGI_temporal;
 
+    uint32_t ReBLUR;
+    uint32_t ReLAX;
+
     uint32_t NRC;
     uint32_t currentMode;
     uint32_t randomValues;
@@ -567,6 +570,9 @@ struct GeneralFeatures{
     uint ReSTIRGI;
     uint ReSTIRGI_temporal;
     
+    uint32_t ReBLUR;
+    uint32_t ReLAX;
+
     uint NRC;
 
     uint currentMode;
@@ -812,7 +818,7 @@ namespace ms
 #define MOX_NRC_MAX_BOUNCE_COUNT 3ul
 #define MOX_NRC_MAX_HASH_GRID_SIZE 4ul
 #define MOX_NRC_HASH_GRID_F 2ul
-
+#define MOX_NRC_RESOLUTION_DIVISOR 8ul
 
 namespace AI
 {
