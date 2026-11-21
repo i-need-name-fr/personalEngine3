@@ -323,6 +323,64 @@ namespace AI
                 MOX_CHECK_RESULT(result);
             }
 
+            try
+            {
+
+                {
+                    std::vector<DescriptorLayoutData> data(18);
+                    data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[1] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[4] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[5] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[6] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[7] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[8] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[9] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[10] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[11] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[12] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[13] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[14] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[15] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[16] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[17] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
+                    DescriptorLayout::CreateInfo info{};
+                    info.context = context;
+                    info.data = data;
+                    info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+                    info.pNext = nullptr;
+                    info.stage = VK_SHADER_STAGE_ALL;
+
+                    dlayouts.push_back(std::move(std::make_shared<DescriptorLayout>(info)));
+                }
+
+                {
+                    std::vector<DescriptorData2> data{};
+                    data.push_back(mox::DescriptorData2::createData( hashGridParamBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0));
+                    data.push_back(mox::DescriptorData2::createData( hashGridInfoBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0));
+                    data.push_back(mox::DescriptorData2::createData( trainingSampleBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,2 , 0));
+                    data.push_back(mox::DescriptorData2::createData( NRCGeneralData.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0));
+
+                    inputLayer->addBindings(data , 4);
+                    outputLayer->addBindings(data , 11);
+
+                    DescriptorBuffer2::CreateInfo info{};
+                    info.context = context;
+                    info.data = data;
+                    info.layout = dlayouts[0].get();
+
+                    dbuffers.push_back(std::move(std::make_shared<DescriptorBuffer2>(info)));
+                }
+                containsPingPong = false;
+            }
+            catch(std::exception &e)
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create DL or DB for NRC");
+            }
+
             {
                 // add 2 functions
                 requestTranslate function = [&](VkCommandBuffer& cmd , const TranslateType type) ->void{_implTranslate(cmd , type);};

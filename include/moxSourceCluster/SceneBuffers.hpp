@@ -31,6 +31,9 @@ namespace Source
         Buffer::pDeviceReadableBuffer generalBuffer{nullptr};
         Buffer::pDeviceReadableBuffer features{nullptr};
         Buffer::pDeviceReadableBuffer sunBuffer{nullptr};
+        Buffer::pDeviceReadableBuffer histoGram{nullptr};
+        // the auto exposure : [ 0 ] = the EV that is applied now ( it lives between the frames ) , [ 1 ] = 0 until the first frame sets it ( then the EV jumps to the target , not crawls from 0 )
+        Buffer::pDeviceReadableBuffer EVBuffer{nullptr};
         Buffer::pDeviceStaticBuffer SSAO_kernel{nullptr};
 
         inline static const std::string Name = "SceneBuffers";
@@ -68,6 +71,8 @@ namespace Source
             features = nullptr;
             sunBuffer = nullptr;
             SSAO_kernel = nullptr;
+            histoGram = nullptr;
+            EVBuffer = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -92,6 +97,13 @@ namespace Source
                     SunSource defaultSun{};
                     info.size = sizeof(SunSource);
                     sunBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info , &defaultSun);
+                    std::vector<uint32_t> zeros(256 , 0);
+                    info.size = sizeof(float) * 256;
+                    histoGram = std::make_shared<Buffer::DeviceReadableBuffer>(info , Buffer::translateToSpan(zeros));
+
+                    std::vector<float> evStart(2 , 0.0f);
+                    info.size = sizeof(float) * evStart.size();
+                    EVBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info , Buffer::translateToSpan(evStart));
 
                     {
                         Buffer::DeviceStaticBuffer::CreateInfo info{};
@@ -117,10 +129,12 @@ namespace Source
                     }
                 }
 
-                // the layout : all three are ConstantBuffer in the shader , so all are uniform buffers
+                // the layout : 0 , 1 , 2 are ConstantBuffer in the shader ( uniform ) , 3 , 4 , 5 are RWStructuredBuffer ( storage )
                 {
-                    std::vector<DescriptorLayoutData> data(4 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
+                    std::vector<DescriptorLayoutData> data(6 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1});
                     data[3] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                    data[4] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                    data[5] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -154,14 +168,26 @@ namespace Source
                     MOX_CHECK_RESULT(result)
                 }
 
+                {
+                    const auto result = _implAddSource(histoGram.get() , "histoGram");
+                    MOX_CHECK_RESULT(result)
+                }
+
+                {
+                    const auto result = _implAddSource(EVBuffer.get() , "EVBuffer");
+                    MOX_CHECK_RESULT(result)
+                }
+
                 // the descriptor buffer : the buffers never change , so it is made once ( there is no ping pong , one descriptor buffer )
                 {
                     std::vector<DescriptorData2> data{};
-                    data.reserve(4);
+                    data.reserve(6);
                     data.push_back(DescriptorData2::createData(generalBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0));
                     data.push_back(DescriptorData2::createData(features.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0));
                     data.push_back(DescriptorData2::createData(sunBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0));
                     data.push_back(DescriptorData2::createData(SSAO_kernel.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0));
+                    data.push_back(DescriptorData2::createData( histoGram.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0));
+                    data.push_back(DescriptorData2::createData(EVBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0));
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

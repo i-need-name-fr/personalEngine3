@@ -13,6 +13,8 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include "../../Vulkan/DescriptorBuffer2/DescriptorBuffer2.hpp"
+
 
 namespace mox
 {
@@ -77,6 +79,25 @@ namespace Buffer
         void translate_RowMajor(VkCommandBuffer& cmd) noexcept
         {
             _implTranslateGradsWeightsToRowMajor(cmd);
+        }
+
+        void addBindings(std::vector<DescriptorData2> &data , const uint32_t firstBinding) noexcept
+        {
+            // grad
+            // weight
+            // offset
+            // staging grad
+            // staging weight
+            // ptr
+            // param
+            data.push_back(mox::DescriptorData2::createData(gradsBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , firstBinding , 0 ));
+            data.push_back(mox::DescriptorData2::createData(weightBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , firstBinding + 1 , 0 ));
+            data.push_back(mox::DescriptorData2::createData(infoBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , firstBinding + 2 , 0 ));
+            data.push_back(mox::DescriptorData2::createData(stagingGradBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , firstBinding + 3 , 0 ));
+            data.push_back(mox::DescriptorData2::createData(stagingWeightBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , firstBinding + 4 , 0 ));
+            data.push_back(mox::DescriptorData2::createData(ptrBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , firstBinding + 5 , 0 ));
+            data.push_back(mox::DescriptorData2::createData(paramBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , firstBinding + 6 , 0 ));
+
         }
 
         void translate_DriverOptimal(VkCommandBuffer& cmd) noexcept
