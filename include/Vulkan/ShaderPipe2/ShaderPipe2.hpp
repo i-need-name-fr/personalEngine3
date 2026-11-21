@@ -66,6 +66,17 @@ namespace mox{
             catch(std::exception &e){throw std::runtime_error("failed to create shader");}
         }
 
+        std::vector<DescriptorLayout*> getLayouts() const noexcept
+        {
+            if(descriptorLayouts.empty()) return {};
+            std::vector<DescriptorLayout*> ls{};
+            for(auto& d : descriptorLayouts)
+            {
+                ls.push_back(d.get());
+            }
+            return ls;
+        }
+
         [[nodiscard]] ErrorDataOutput<void> createLayouts(std::vector<DescriptorLayout::CreateInfo> layouts , std::vector<VkPushConstantRange> ranges , VkShaderStageFlags stage) noexcept{
             try{
 

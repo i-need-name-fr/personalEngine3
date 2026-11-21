@@ -33,7 +33,9 @@ namespace Source
         Buffer::pDeviceReadableBuffer sunBuffer{nullptr};
         Buffer::pDeviceStaticBuffer SSAO_kernel{nullptr};
 
-        explicit SceneBuffers(moxContext2* context) : SourceCluster(context , "SceneBuffers")
+        inline static const std::string Name = "SceneBuffers";
+
+        explicit SceneBuffers(moxContext2* context) : SourceCluster(context , Name)
         {
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice | VkReqTypeQueueManager , context);

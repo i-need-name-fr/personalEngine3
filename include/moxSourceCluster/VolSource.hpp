@@ -32,7 +32,9 @@ namespace Source
 
         VkExtent2D extent{};
 
-        explicit VolSource(moxContext2* context) : SourceCluster(context , "VolSource")
+        inline static const std::string Name = "VolSource";
+
+        explicit VolSource(moxContext2* context) : SourceCluster(context , Name)
         {
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice | VkReqTypeQueueManager | VkReqTypeSwapchain , context);

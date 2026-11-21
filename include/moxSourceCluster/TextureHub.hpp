@@ -173,7 +173,9 @@ namespace Source{
             performDelete();
         }
 
-        explicit TextureHub(moxContext2* context) : SourceCluster(context, "TextureSource"){
+        inline static const std::string Name = "TextureHub";
+
+        explicit TextureHub(moxContext2* context) : SourceCluster(context, Name){
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice | VkReqTypeQueueManager , context);
                 if(!result.has_value())

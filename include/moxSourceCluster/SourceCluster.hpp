@@ -86,6 +86,20 @@ namespace mox
 
         const std::string requestName() const noexcept {return this->name;}
 
+        template<typename T>
+        requires std::is_same_v<T , Image::RenderImage2*> || std::is_same_v<T , Image::Texture2*> || std::is_same_v<T , Image::Skybox2*> || std::is_same_v<T , Buffer::BufferBase2*>
+        ErrorDataOutput<T> requestStructure(const std::string& name) noexcept
+        {
+            const auto it = sources.find(name);
+            if(it == sources.end())
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , std::format("failed to find the {}" , name));
+            }
+
+            if(it->second.type() != typeid(T)) MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , std::format("failed to requestStructure , since the type isnt the same , name -> {}" , name));
+            return std::any_cast<T>(it->second);
+        }
+
         virtual ~SourceCluster() noexcept
         {
             processDelete();

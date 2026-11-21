@@ -239,6 +239,17 @@ namespace Source
             geometryBuffer = nullptr;
         }
 
+        MOX_NO_DISCARD inline static uint32_t getMaxGeometry() noexcept
+        {
+            std::lock_guard<std::recursive_mutex> guard(heapMutex);
+            return maxGeometry;
+        }
+
+        MOX_NO_DISCARD [[gnu::hot]] inline static std::uint32_t getInstanceLayoutSize() noexcept
+        {
+            return instanceLayout.size();
+        }
+
     protected:
 
         // getOffset , vertex , indices , meshet .... 
@@ -399,12 +410,6 @@ namespace Source
             std::lock_guard<std::recursive_mutex> guard(heapMutex);
             if(startedToRecord) return VertexHeapStatus::Recording;
             return allowToRecord ? VertexHeapStatus::NotStarted : VertexHeapStatus::Finished;
-        }
-
-        MOX_NO_DISCARD inline static uint32_t getMaxGeometry() noexcept
-        {
-            std::lock_guard<std::recursive_mutex> guard(heapMutex);
-            return maxGeometry;
         }
 
         // needsUpdate : only LUT , mesh data , instance and instance layout have it ( append and change of them set it ) , the vertices , indices , meshlets and so on are uploaded once in End

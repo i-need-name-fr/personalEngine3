@@ -67,35 +67,11 @@ namespace mox
     inline static std::string const moxNodeRenderGeneralSet = "__MX_DSET_GENERAL_SET__"; // this is 
     inline static std::string const moxNodePassDefaultName = "__MX_GRAPH_P3_DEFAULT_NAME__";
 
-    template<const std::type_index& type>
-    requires (type == typeid(Image::RenderImage2*))
-    Image::RenderImage2* convertToOrigin(moxNodePassResource &data) noexcept
-    {
-        return std::any_cast<Image::RenderImage2*>(data.data);
-    }
-
-    template<const std::type_index& type>
-    requires (type == typeid(Image::Skybox2*))
-    Image::Skybox2* convertToOrigin(moxNodePassResource &data) noexcept
-    {
-        return std::any_cast<Image::Skybox2*>(data.data);
-    }
-
-    template<const std::type_index& type>
-    requires (type == typeid(Image::Texture2*))
-    Image::Texture2* convertToOrigin(moxNodePassResource &data) noexcept 
-    {
-        return std::any_cast<Image::Texture2*>(data.data);
-    }
-
-    template<const std::type_index& type>
-    requires (type == typeid(Buffer::BufferBase2*))
-    Buffer::BufferBase2* convertToOrigin(moxNodePassResource &data) noexcept
-    {
-        return std::any_cast<Buffer::BufferBase2*>(data.data);
-    }
-
     // UPDATED: new NodePass now can pass the functions,  however the user needs to transfer it to the direct type , cannot be used directly
+    // GENERAL INFORMATION
+    // some of the passes can ask for std::filesystem::path without file type , direction and name only 
+    // those Passes might have multiple pipes and therefore different names, there will be a remark for that kind of names
+    // classified as _F ( full ) or _S ( short )
     class NodePass
     {
     public:
@@ -313,6 +289,16 @@ namespace mox
         void bindAutoDescriptorBuffers(VkCommandBuffer& cmd , const VkPipelineBindPoint& point , PipelineLayout* layout) noexcept __attribute__((nonnull)) 
         {
             _implBindDescriptorBuffers(cmd , point , layout);
+        }
+
+        const std::string requestPPname(const std::string& name , bool current) noexcept
+        {
+
+            const std::uint32_t id = context->sc->frameIndex % 2;
+
+            const std::string data = name + "_" + std::to_string(current ? id : !id);
+
+            return data;
         }
 
     private:

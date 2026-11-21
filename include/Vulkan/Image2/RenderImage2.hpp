@@ -179,6 +179,26 @@ namespace Image{
             }
         }
 
+        const void cleanAndTranslate(VkCommandBuffer& cmd , VkAccessFlags2 access , VkPipelineStageFlags2 stage) noexcept
+        {
+            {
+                auto result = translateImage(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+                const auto dep = TypicalDependency<1>(&result);
+
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+
+            cleanTheImage(cmd);
+
+            {
+                auto result = translateImage(access , stage);
+                const auto dep = TypicalDependency<1>(&result);
+
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+        }
+
+
         const sl::Resource translateToResource() const noexcept
         {
             sl::Resource info{};

@@ -43,8 +43,9 @@ namespace Source
 
         LightHub() = delete;
         
+        inline static const std::string Name = "LightHub";
 
-        explicit LightHub(const CreateInfo &info) : SourceCluster(info.context , "LightHub")
+        explicit LightHub(const CreateInfo &info) : SourceCluster(info.context , Name)
         {
             {
                 const auto result = checkRequirements(VkReqTypeQueueManager| VkReqTypeLogicalDevice | VkReqTypePhysicalDevice , info.context);

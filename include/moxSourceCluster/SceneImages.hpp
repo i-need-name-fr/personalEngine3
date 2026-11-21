@@ -38,7 +38,9 @@ namespace Source
             std::filesystem::path HiZ_translate;
         };
 
-        explicit SceneImages(const CreateInfo& info) : SourceCluster(info.context , "SceneImages")
+        inline static const std::string Name = "SceneImages";
+
+        explicit SceneImages(const CreateInfo& info) : SourceCluster(info.context , Name)
         {
             {
                 const auto result = _implInit(info);

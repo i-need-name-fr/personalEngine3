@@ -38,7 +38,9 @@ namespace Source
         // the shaders have to index them with this extent , not with the extent of the screen
         VkExtent2D extent{};
 
-        explicit SceneReSTIR(moxContext2* context) : SourceCluster(context , "SceneReSTIR")
+        inline static const std::string Name = "SceneReSTIR";
+
+        explicit SceneReSTIR(moxContext2* context) : SourceCluster(context , Name)
         {
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice | VkReqTypeQueueManager | VkReqTypeSwapchain , context);

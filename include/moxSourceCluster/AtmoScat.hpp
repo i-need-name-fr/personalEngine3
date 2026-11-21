@@ -39,7 +39,9 @@ namespace Source
 
         Buffer::pDeviceReadableBuffer skyBuffer{nullptr};
 
-        explicit AtmoScat(moxContext2* context) __attribute__((nonnull)) : SourceCluster(context , "AtmoScat") 
+        inline static const std::string Name = "AtmoScat";
+
+        explicit AtmoScat(moxContext2* context) __attribute__((nonnull)) : SourceCluster(context , Name) 
         {
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice | VkReqTypeQueueManager , context);
