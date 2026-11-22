@@ -330,6 +330,10 @@ float3 sampleSkybox(const float3 P ,const float3 N){
     return result;
 }
 
+float3 sampleIBL(const float3 N){
+    return IBL.SampleLevel(txSampler , N , 0).xyz * sunBuffer.intensity;
+}
+
 // how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
 // with a few rays the yes / no flickers at the border of a cover , the weight changes in steps
 float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
@@ -622,10 +626,9 @@ namespace ReSTIRGI{
             const float skyNdotV = max(dot(data.N , skyV) , 0.0001f);
             const float3 skyF = F_fresnel(skyF0 , skyNdotV);
             const float3 skyKD = (1.0f - skyF) * (1.0f - data.metallic);
-            result += sampleSkybox(data.P , data.N) * skyKD;
+            result += sampleIBL(data.N) * skyKD * skyVisibility;
         }
 
-        // the multi bounce : the light that this point gets itself ( the reservoir of the last frame ) , diffuse only
         result += previousBounce(data);
 
         result *= saveAlbedo;
@@ -674,7 +677,7 @@ namespace ReSTIRGI{
             const float NdotV = max(dot(info.N , V) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);
             const float3 kD = (1.0f - F);
-            res.radiance = sampleSkybox(info.P , info.N) * kD;
+            res.radiance = sampleIBL(info.N) * skyVisibilityAt(info.P , info.N , seed) * kD;
             const float3 fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
             const float  p_hat = luminance(res.radiance * fcos);
             res.weightSum = p_hat / pdf;
