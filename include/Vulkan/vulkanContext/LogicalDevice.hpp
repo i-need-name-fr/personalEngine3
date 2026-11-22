@@ -9,28 +9,35 @@ namespace mox{
     class LogicalDevice final{
     private:
         
-        [[nodiscard]] ErrorDataOutput<void> createLogicalDevice(VkPhysicalDevice pDevice , VkSurfaceKHR surface, const uint32_t queueCount , const uint32_t extraGraphics , const uint32_t extraCompute){
+        [[nodiscard]] ErrorDataOutput<void> createLogicalDevice(VkPhysicalDevice pDevice , VkSurfaceKHR surface, const uint32_t queueCount , const uint32_t forgeGraphics , const uint32_t forgeCompute , const uint32_t extraGraphics , const uint32_t extraCompute){
             DetailsCreateInfo det{};
             det.device = pDevice;
             det.surface = surface;
             auto details = queueFamilyDetails::queryQueueFamilyDetails(det);
 
-            // family -> how many queues of it are created . the engine takes queueCount queues from the graphics family and from the present family ( the same family in most cases ) ,
-            // Streamline asks for extra graphics queues ( from the graphics family , AFTER the ones of the engine ) and extra compute queues ( from the compute only family )
+            // family -> how many queues of it are created . the order inside of a family : [ the queues of the engine ( queueCount ) | the queues of StreamForge | the queues of Streamline ]
+            //   graphics family : the engine takes queueCount queues ( also from the present family , the same family in most cases ) , then forgeGraphics for StreamForge , then extraGraphics for SL
+            //   compute only family : forgeCompute for StreamForge first , then extraCompute for SL
             std::map<uint32_t , uint32_t> counts;
-            counts[details.graphics.value()] = queueCount + extraGraphics;
+            counts[details.graphics.value()] = queueCount + forgeGraphics + extraGraphics;
             counts[details.present.value()] = std::max(counts[details.present.value()] , queueCount);
+
+            // where the queues of StreamForge start ( the offsets of its streams )
+            forgeGraphicsIndex = queueCount;
+            forgeComputeIndex = 0;
 
             // where the queues of SL start in their families : slSetVulkanInfo needs it
             slGraphicsFamily = details.graphics.value();
-            slGraphicsIndex = queueCount;
-            if(extraCompute > 0)
+            slGraphicsIndex = queueCount + forgeGraphics;
+            if(forgeCompute > 0 || extraCompute > 0)
             {
                 const uint32_t family = details.compute.value();
                 const auto found = counts.find(family);
+                const uint32_t base = (found != counts.end()) ? found->second : 0;
+                forgeComputeIndex = base;
                 slComputeFamily = family;
-                slComputeIndex = (found != counts.end()) ? found->second : 0;
-                counts[family] = slComputeIndex + extraCompute;
+                slComputeIndex = base + forgeCompute;
+                counts[family] = base + forgeCompute + extraCompute;
             }
 
             // a family can not give more queues than it has
@@ -222,6 +229,9 @@ namespace mox{
             VkSurfaceKHR surface;
             uint32_t requiredForGraphics;
             uint32_t requiredForMultiThread;
+            // the queues of StreamForge : graphics ones come from the graphics family right after the queues of the engine , compute ones from the compute only family
+            uint32_t forgeGraphicsQueues = 0;
+            uint32_t forgeComputeQueues = 0;
             // the extra queues that Streamline asked for ( StreamlineContext::extraGraphicsQueues / extraComputeQueues ) , 0 = no Streamline
             uint32_t extraGraphicsQueues = 0;
             uint32_t extraComputeQueues = 0;
@@ -229,8 +239,8 @@ namespace mox{
 
         LogicalDevice(const logicalDeviceCreateInfo& info){
             if(!info.device || !info.surface) throw std::runtime_error("couldnt create the logicalDevice , since the info is nullptr");
-            if(info.requiredForGraphics + info.requiredForMultiThread + info.extraGraphicsQueues > 16) throw std::runtime_error("couldnt create the logical device since the required queues is more than 16");
-            auto result = createLogicalDevice(info.device , info.surface,  info.requiredForGraphics + info.requiredForMultiThread , info.extraGraphicsQueues , info.extraComputeQueues);
+            if(info.requiredForGraphics + info.requiredForMultiThread + info.forgeGraphicsQueues + info.extraGraphicsQueues > 16) throw std::runtime_error("couldnt create the logical device since the required queues is more than 16");
+            auto result = createLogicalDevice(info.device , info.surface,  info.requiredForGraphics + info.requiredForMultiThread , info.forgeGraphicsQueues , info.forgeComputeQueues , info.extraGraphicsQueues , info.extraComputeQueues);
             if(result.has_value()){
                 ErrorDataType res = {MOX_ERROR_TYPE_SUCCESS , "logical device has been created "};
                 engineLogger(&res);
@@ -253,6 +263,10 @@ namespace mox{
         }
 
         VkDevice device = nullptr;
+
+        // where the queues of StreamForge start in their families ( the offsets for gqOffset / cqOffset )
+        uint32_t forgeGraphicsIndex = 0;
+        uint32_t forgeComputeIndex = 0;
 
         // where the queues of Streamline are : the family and the index of the FIRST queue of SL in it ( slSetVulkanInfo ) . the queues of the engine are before it
         uint32_t slGraphicsFamily = 0;

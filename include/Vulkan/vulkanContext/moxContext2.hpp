@@ -21,11 +21,11 @@
 #include "PhysicalDevice.hpp"
 #include "LogicalDevice.hpp"
 #include "SwapChain.hpp"
-#include "Queue.hpp"
-#include "GPUMultiThread.hpp"
 #include "vmaAllocator.hpp"
 #include "JobManager.hpp"
 #include "../../AI/NeuralBuffer/SystemCheck.hpp"
+#include "Stream.hpp"
+#include "StreamForge.hpp"
 
 #define MOX_UNLIKELY [[unlikely]]
 #define MOX_LIKELY [[likely]]
@@ -87,13 +87,13 @@ namespace mox{
 
                 logicalInfo.requiredForGraphics = 2;
                 logicalInfo.requiredForMultiThread = m + am;
-                // the queues that Streamline asked for are created together with the ones of the engine
+                logicalInfo.forgeGraphicsQueues = forgeGraphicsCount;
+                logicalInfo.forgeComputeQueues = forgeComputeCount;
                 logicalInfo.extraGraphicsQueues = stream->extraGraphicsQueues();
                 logicalInfo.extraComputeQueues = stream->extraComputeQueues();
 
                 logicalDevice = std::make_shared<LogicalDevice>(logicalInfo);
 
-                // right after the device : the proxies of the swapchain / present , and WHERE the queues of SL are ( the index of the first one in its family )
                 stream->loadDeviceProxies(logicalDevice->device);
                 {
                     const auto slInfo = stream->setVulkanInfo(instance->instance , physicalDevice->device , logicalDevice->device ,
@@ -113,35 +113,27 @@ namespace mox{
 
                 // now the init for queues
                 {
-                    Queue::CreateInfo info{};
-                    info.countIndex = 0;
-                    info.device = logicalDevice->device;
-                    info.pDevice = physicalDevice->device;
-                    info.needsCmd = true;
+                    Stream<StreamType::Graphics , Swapchain::frames_in_flight>::CreateInfo info{};
                     info.surface = surface->surface;
+                    info.instance = instance->instance;
+                    info.physicalDevice = physicalDevice->device;
+                    info.logicalDevice = logicalDevice->device;
+                    info.index = 0;
 
-                    graphicsQueue = std::make_shared<Queue>(info);
-
-                    info.countIndex = 1;
-
-                    VirtualShadowQueue = std::make_shared<QueueLane>(info);
+                    graphicsQueue = std::make_shared<Stream<StreamType::Graphics , Swapchain::frames_in_flight>>(info);
                 }
 
+                // later for queue multithread ( FINALY ) : StreamForge with forgeGraphicsCount graphics streams and forgeComputeCount compute streams , every stream is its own queue
                 {
-                    // we used only 0 and 1 , so offset is 2
-                    QueueManager::CreateInfo info{};
-                    info.device = logicalDevice->device;
-                    info.pDevice = physicalDevice->device;
-                    info.firstIndex = 2;
-                    info.threadsCount = m;
+                    StreamForge<forgeGraphicsCount , forgeComputeCount>::CreateInfo info{};
+                    info.logicalDevice = logicalDevice->device;
+                    info.physicalDevice = physicalDevice->device;
                     info.surface = surface->surface;
+                    info.instance = instance->instance;
+                    info.gqOffset = logicalDevice->forgeGraphicsIndex;
+                    info.cqOffset = logicalDevice->forgeComputeIndex;
 
-                    queueManager = std::make_shared<QueueManager>(info);
-                }
-
-                // later for queue multithread
-                {
-                    const uint32_t offset = m + 2;
+                    forge = std::make_shared<StreamForge<forgeGraphicsCount , forgeComputeCount>>(info);
                 }
 
                 Swapchain::SwapchainCreateInfo info{};
@@ -248,10 +240,9 @@ namespace mox{
             images.clear();
             views.clear();
             sc = nullptr;
-            queueManager = nullptr;
+            forge = nullptr;
             graphicsQueue = nullptr;
             allocator = nullptr;
-            VirtualShadowQueue = nullptr;
             stream = nullptr;
             logicalDevice = nullptr;
             physicalDevice=  nullptr;
@@ -292,11 +283,11 @@ namespace mox{
 
         pSwapchain sc = nullptr;
 
-        pQueueManager queueManager = nullptr;
-        pQueue graphicsQueue = nullptr;
-        pQueueLane VirtualShadowQueue = nullptr;
-
-
+        pStream<StreamType::Graphics , Swapchain::frames_in_flight> graphicsQueue;
+        // the size of StreamForge : one stream = one queue
+        static constexpr uint32_t forgeGraphicsCount = 10;
+        static constexpr uint32_t forgeComputeCount = 5;
+        pStreamForge<forgeGraphicsCount , forgeComputeCount> forge{};
         pMemoryAllocator allocator{nullptr};
 
         std::vector<VkImage> images{};
@@ -378,13 +369,42 @@ namespace mox{
             return {};
         }
 
+        void addJob(const StreamForgeFunctionType& function , const StreamType type)  noexcept
+        {
+            return forge->addJob(function , type);
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> executeJobs(const StreamType type) noexcept
+        {
+            return forge->executeJobs(type);
+        }
+
+        void executeJobsDetached(const StreamType type) noexcept
+        {
+            forge->executeJobsDetached(type);
+        }
+
+        // the streams one after another , returns when the GPU is done
+        [[nodiscard]] ErrorDataOutput<void> executeJobsWithSync(const StreamType type) noexcept
+        {
+            return forge->executeJobsWithSync(type);
+        }
+
+        // one function , returns when the GPU is done
+        [[nodiscard]] ErrorDataOutput<void> executeSingular(const StreamForgeFunctionType& function , const StreamType type) noexcept
+        {
+            return forge->executeSingular(function , type);
+        }
+
+        void wait(const StreamType type) noexcept
+        {
+            forge->waitForAll(type);
+        }
 
         // new feature 
-        MOX_NO_DISCARD ErrorDataOutput<void> executeCommand(const cmdFunctionType& function ,const  VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept
+        MOX_NO_DISCARD ErrorDataOutput<void> executeCommand(const StreamForgeFunctionType function ,const  VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT , const StreamType type = StreamType::Graphics) noexcept
         {
-            queueManager->Begin();
-            queueManager->recordCmd(function , stage);
-            return queueManager->End();
+            return forge->executeSingular(function , type);
         }
 
         sl::Constants convertToConstants(const GeneralInfo& data , const glm::mat4 proj ) const noexcept
@@ -468,7 +488,7 @@ namespace mox{
         }
 
         if((reqs &VkReqTypeQueueManager) ==VkReqTypeQueueManager){
-            if(!context->queueManager) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the queue manager is nullptr"});
+            if(!context->forge) return  std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "the requirement for context is not valid, the queue manager is nullptr"});
         }
 
         if((reqs & VkReqTypeLogicalDevice) == VkReqTypeLogicalDevice){

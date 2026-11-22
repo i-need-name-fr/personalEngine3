@@ -263,16 +263,12 @@ namespace Source
         [[nodiscard]] ErrorDataOutput<void> _implUpdateGridAuto(const glm::vec3 playerPos) noexcept
         {
 
-            context->queueManager->Begin();
-
-            cmdFunctionType function = [&](VkCommandBuffer& cmd) -> void{
+            StreamForgeFunctionType function = [&](VkCommandBuffer& cmd) -> void{
                 _implUpdateGrid(cmd , user->position);
             };
 
-            context->queueManager->recordCmd(function  , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-
             {
-                const auto result = context->queueManager->End();
+                const auto result = context->executeCommand(function , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
                 if(!result.has_value()) return result;
             }
 

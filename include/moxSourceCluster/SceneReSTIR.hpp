@@ -15,9 +15,11 @@ namespace Source
     [[vk::binding(1 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;   the reservoirs of the previous frame
     [[vk::binding(2 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> ReSTIRPTBuffer;
     [[vk::binding(3 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> prevReSTIRPTBuffer;
+    [[vk::binding(4 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> ReSTIRSSBuffer;       ReSTIR SSS ( the subsurface scattering )
+    [[vk::binding(5 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> prevReSTIRSSBuffer;
 
     ping pong : the pair is [0] and [1] , the descriptor buffer number id ( = frameIndex % 2 ) has the buffer [id] as the "next" one and [!id] as the "prev" one ,
-    the same rule as moxPingPongIndex . the sources are ReSTIRGIBuffer_0 , ReSTIRGIBuffer_1 , ReSTIRPTBuffer_0 , ReSTIRPTBuffer_1 ( the name of the .mox file + _0 or _1 )
+    the same rule as moxPingPongIndex . the sources are ReSTIRGIBuffer_0 , ReSTIRGIBuffer_1 , ReSTIRPTBuffer_0 , ReSTIRPTBuffer_1 , ReSTIRSSBuffer_0 , ReSTIRSSBuffer_1 ( the name of the .mox file + _0 or _1 )
 
     */
 
@@ -27,15 +29,16 @@ namespace Source
 
         SceneReSTIR() = delete;
 
-        // device local , one reservoir per pixel of the half extent . the CPU never reads them , so they are not readable ( a readable buffer would need the memory that is visible for the CPU too ,
+        // device local , one reservoir per pixel of the screen . the CPU never reads them , so they are not readable ( a readable buffer would need the memory that is visible for the CPU too ,
         // and these are the biggest buffers of the engine ) . if the CPU has to read them one day , the type is the only thing to change
         using ReservoirBuffer = Buffer::pGeneralBuffer2<Buffer::BufferType::Device , false>;
 
         std::array<ReservoirBuffer , 2> ReSTIRGIBuffer{};
         std::array<ReservoirBuffer , 2> ReSTIRPTBuffer{};
+        std::array<ReservoirBuffer , 2> ReSTIRSSBuffer{};
 
-        // the reservoirs have the HALF of the extent of the screen ( one reservoir per pixel of this extent ) , the same as indirectImage of SceneImages :
-        // the shaders have to index them with this extent , not with the extent of the screen
+        // the reservoirs have the FULL extent of the screen ( one reservoir per pixel ) : RayGen indexes them with bufferIndex ( the width of the screen ) . they were the half
+        // of it when indirectImage was half . the cost at 1920 x 1080 : GI 64 B + PT 80 B + SS 80 B per pixel , x2 for the ping pong , about 930 MB
         VkExtent2D extent{};
 
         inline static const std::string Name = "SceneReSTIR";
@@ -71,6 +74,7 @@ namespace Source
         {
             for(auto& buffer : ReSTIRGIBuffer) buffer = nullptr;
             for(auto& buffer : ReSTIRPTBuffer) buffer = nullptr;
+            for(auto& buffer : ReSTIRSSBuffer) buffer = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -90,21 +94,22 @@ namespace Source
         {
             try
             {
-                // the same expression as the extent of indirectImage in SceneImages ( at least 1 pixel )
-                extent = {std::max(1u , context->sc->extent.width / 2) , std::max(1u , context->sc->extent.height / 2)};
+                // the same extent as the images of SceneImages ( at least 1 pixel )
+                extent = {std::max(1u , context->sc->extent.width) , std::max(1u , context->sc->extent.height)};
 
                 for(const auto& id : {0 , 1})
                 {
                     ReSTIRGIBuffer[id] = _implCreateReservoirs<ReservoirGI>();
                     ReSTIRPTBuffer[id] = _implCreateReservoirs<ReservoirPT>();
+                    ReSTIRSSBuffer[id] = _implCreateReservoirs<ReservoirSS>();
                 }
 
                 {
-                    const std::array<Buffer::BufferBase2* , 4> all = {ReSTIRGIBuffer[0].get() , ReSTIRGIBuffer[1].get() , ReSTIRPTBuffer[0].get() , ReSTIRPTBuffer[1].get()};
+                    const std::array<Buffer::BufferBase2* , 6> all = {ReSTIRGIBuffer[0].get() , ReSTIRGIBuffer[1].get() , ReSTIRPTBuffer[0].get() , ReSTIRPTBuffer[1].get() , ReSTIRSSBuffer[0].get() , ReSTIRSSBuffer[1].get()};
 
-                    cmdFunctionType function = [&](VkCommandBuffer& cmd) -> void
+                    StreamForgeFunctionType function = [&](VkCommandBuffer& cmd) -> void
                     {
-                        std::array<VkBufferMemoryBarrier2 , 4> barriers{};
+                        std::array<VkBufferMemoryBarrier2 , 6> barriers{};
                         for(size_t i = 0 ; i < all.size() ; i++)
                         {
                             // translateBuffer also keeps the state of the buffer : the first barrier of NodePass will start from the transfer write
@@ -138,9 +143,14 @@ namespace Source
                     MOX_CHECK_RESULT(result)
                 }
 
-                // the layout : 4 storage buffers
                 {
-                    std::vector<DescriptorLayoutData> data(4 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1});
+                    const auto result = _implAddSource(moxPingPongBufferBase2{ReSTIRSSBuffer[0].get() , ReSTIRSSBuffer[1].get()} , "ReSTIRSSBuffer");
+                    MOX_CHECK_RESULT(result)
+                }
+
+                // the layout : 6 storage buffers
+                {
+                    std::vector<DescriptorLayoutData> data(6 , DescriptorLayoutData{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1});
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -158,11 +168,13 @@ namespace Source
                 for(const auto& id : {0 , 1})
                 {
                     std::vector<DescriptorData2> data{};
-                    data.reserve(4);
+                    data.reserve(6);
                     data.push_back(DescriptorData2::createData(ReSTIRGIBuffer[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0));
                     data.push_back(DescriptorData2::createData(ReSTIRGIBuffer[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0));
                     data.push_back(DescriptorData2::createData(ReSTIRPTBuffer[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0));
                     data.push_back(DescriptorData2::createData(ReSTIRPTBuffer[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0));
+                    data.push_back(DescriptorData2::createData(ReSTIRSSBuffer[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0));
+                    data.push_back(DescriptorData2::createData(ReSTIRSSBuffer[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0));
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

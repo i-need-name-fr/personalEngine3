@@ -169,9 +169,7 @@ namespace mox{
 
                 const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
 
-                info.context->queueManager->Begin();
-
-                cmdFunctionType function = [&](VkCommandBuffer &cmd) -> void{
+                StreamForgeFunctionType function = [&](VkCommandBuffer &cmd) -> void{
                     VkMemoryBarrier barrier{};
                     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
                     barrier.pNext = nullptr;
@@ -188,10 +186,8 @@ namespace mox{
                     vkCmdPipelineBarrier(cmd , VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR , VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR , 0 , 1 , &barrier , 0 , nullptr , 0 , nullptr);
                 };
 
-                info.context->queueManager->recordCmd(function , VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
-
                 {
-                    const auto result = info.context->queueManager->End();
+                    const auto result = info.context->executeCommand(function , VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
                     if(!result.has_value()) return std::unexpected(result.error());
                 }
 

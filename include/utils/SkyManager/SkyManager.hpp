@@ -253,7 +253,7 @@ namespace utils
 
         MOX_NO_DISCARD ErrorDataOutput<void> _implCreateSingleUsageImages(moxContext2* context) noexcept __attribute__((nonnull))
         {
-            cmdFunctionType function = [&](VkCommandBuffer& cmd) -> void {_implExecuteSingle(cmd);};
+            StreamForgeFunctionType function = [&](VkCommandBuffer& cmd) -> void {_implExecuteSingle(cmd);};
             return context->executeCommand(function);
         }
 

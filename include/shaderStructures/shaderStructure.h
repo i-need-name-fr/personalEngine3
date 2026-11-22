@@ -72,19 +72,6 @@ static const float PI = 3.14159265f;
 // ---------------------------------------------------------------------------
 // RayTracing pipeline: 3 hit groups, 3 miss shaders
 // the SHADOW hit group is an any hit only ( the bodies of the lamps do not shadow ) : the shadow rays use it as RayContributionToHitGroupIndex
-#define RT_HITGROUP_GENERAL 0
-#define RT_HITGROUP_HITINFO 1
-#define RT_HITGROUP_SHADOW  2
-
-#define RT_MISS_GENERAL 0
-#define RT_MISS_HITINFO 1
-#define RT_MISS_SHADOW  2
-
-// PathTracing pipeline: 1 hit group, 2 miss shaders
-#define PT_HITGROUP_GENERAL 0
-
-#define PT_MISS_GENERAL 0
-#define PT_MISS_SHADOW  1
 
 #define PT_REQUIRED 1
 #define PT_NOT_REQUIRED 0
@@ -399,6 +386,64 @@ struct ReservoirGI{
     float roughness;
 };
 
+
+struct ReservoirSS
+{
+#ifdef __cplusplus
+    alignas(16) glm::vec3 radiance;
+    alignas(16) glm::vec3 position;
+    alignas(16) glm::vec3 normal;
+
+#else
+    float3 radiance;
+    float3 position;
+    float3 normal;
+#endif
+
+    float W;
+    int32_t M;
+    float metallic;
+    float roughness;
+
+    float weightSum;
+    uint32_t valid;
+
+    float padding0;
+    float padding1;
+
+#ifdef __cplusplus
+    inline static constexpr uint32_t maxM = 64;
+#else
+    // HLSL does not accept `inline static` with a value ( it has to be static const )
+    static const uint maxM = 64;
+    static const uint maxR = 5.0f;
+#endif
+
+    void update(ReservoirSS can , const float canW , uint32_t canM , float rnd)
+    {
+        M += canM;
+        weightSum += canW;
+        if(weightSum > 0.0f && rnd * weightSum < canW)
+        {
+
+            const float minHistoryK = 0.5f;
+#ifdef __cplusplus
+            const float weight = glm::max(glm::dot(can.normal , normal) , 0.0f);
+#else
+            const float weight = saturate(dot(can.normal , normal));
+#endif
+
+#ifdef __cplusplus
+            radiance = glm::mix(radiance , can.radiance * weight , 1.0f / float(M));
+#else
+            radiance = lerp(radiance , can.radiance * weight , 1.0f / float(M));
+#endif      
+            position = can.position;
+            normal = can.normal;
+        }
+    }
+};
+
 #define MOX_RESTIR_PT_HIT_COMMITTED 1.0f
 #define MOX_RESTIR_PT_NON_HIT_COMMITTED 0.0f
 #define MOX_RESTIR_PT_HISTORY_K 0.9f
@@ -554,6 +599,7 @@ struct GeneralFeatures{
     float sunShadowFade;
 
     uint32_t NKPD;
+    uint32_t ReSTIRSSS;
 #else
 
     uint AO;
@@ -592,6 +638,7 @@ struct GeneralFeatures{
     float sunShadowFade;
 
     uint32_t NKPD;
+    uint32_t ReSTIRSSS;
 #endif
 };
 
@@ -697,8 +744,8 @@ namespace lg{
         float radius;
 
         float sourceRadius; // now source radius is about radius of light itself , it defines the directions UV for area light 
-        float padding1;
-        float padding2;
+        float Linear;
+        float Quadratic;
     };
 
     // idea is like this , there is a new Buffer , LightBufferIndices
@@ -971,7 +1018,7 @@ struct GeneralObjectInfo{
     
     float roughness;
     float metallic;
-
+    uint LUT_index;
 };
 
 

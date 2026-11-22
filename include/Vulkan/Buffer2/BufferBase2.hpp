@@ -144,7 +144,7 @@ namespace Buffer{
                 return std::unexpected(error);
             }
 
-            [[unlikely]] if(!data.context->queueManager){
+            [[unlikely]] if(!data.context->forge){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create buffer base since the context has null data"};
                 return std::unexpected(error);
             }
@@ -213,7 +213,7 @@ namespace Buffer{
                 return std::unexpected(error);
             }
 
-            cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
+            StreamForgeFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
                 VkBufferCopy copy{};
                 copy.dstOffset = 0;
                 copy.srcOffset = 0;
@@ -222,11 +222,7 @@ namespace Buffer{
                 vkCmdCopyBuffer(cmd  ,src , dst , 1 , &copy);
             };
 
-            context->queueManager->Begin();
-
-            context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-            auto result = context->queueManager->End();
+            auto result = context->executeCommand(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             if(!result.has_value()){
                 return std::unexpected(result.error());
             }

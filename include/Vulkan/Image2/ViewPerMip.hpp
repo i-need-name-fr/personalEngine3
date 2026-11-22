@@ -226,7 +226,7 @@ namespace Image{
             stages = std::move(std::vector<VkPipelineStageFlags2>(T , VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT));
             inputImage = input.image;
 
-            cmdFunctionType function = [&](VkCommandBuffer& cmd) ->void {
+            StreamForgeFunctionType function = [&](VkCommandBuffer& cmd) ->void {
                 auto barrier = translateImageCombined(VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT , views.size() , 1 );
 
                 VkDependencyInfo dep{};
@@ -243,11 +243,8 @@ namespace Image{
                 vkCmdPipelineBarrier2(cmd , &dep);
             };
 
-            input.context->queueManager->Begin();
-
-            input.context->queueManager->recordCmd(function ,VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             {
-                const auto result = input.context->queueManager->End();
+                const auto result = input.context->executeCommand(function , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
                 if(!result.has_value()) return result;
             }
 

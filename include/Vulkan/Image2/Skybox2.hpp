@@ -273,7 +273,7 @@ namespace Image{
             try{
                 Buffer::GeneralBuffer2<Buffer::BufferType::Host , true> staging(info, Buffer::translateToSpan(buffer));
 
-                cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
+                StreamForgeFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
                     if(!cmd) return;
                     auto barrier = translateImageUndefined(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
 
@@ -298,11 +298,7 @@ namespace Image{
                     vkCmdPipelineBarrier2(cmd , &dep);
                 };
 
-                context->queueManager->Begin();
-
-                context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-                const auto result = context->queueManager->End();
+                const auto result = context->executeCommand(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
                 if(!result.has_value()){
                     return std::unexpected(result.error());
@@ -379,7 +375,7 @@ namespace Image{
             }
 
             // now we have to translate the cube
-            cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
+            StreamForgeFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
                 if(!cmd) return;
                 auto barrier = translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
@@ -397,11 +393,7 @@ namespace Image{
                 vkCmdPipelineBarrier2(cmd , &dep);
             };
 
-            context->queueManager->Begin();
-
-            context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-            const auto result = context->queueManager->End();
+            const auto result = context->executeCommand(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
             if(!result.has_value()){
                 return std::unexpected(result.error());

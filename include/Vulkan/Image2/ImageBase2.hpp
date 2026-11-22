@@ -104,7 +104,7 @@ namespace Image{
                 return std::unexpected(error);
             }
 
-            if(!context->queueManager){
+            if(!context->forge){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create the image , since the context has null parameters"};
                 return std::unexpected(error);
             }

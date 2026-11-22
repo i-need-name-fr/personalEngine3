@@ -68,7 +68,7 @@ namespace utils
                 MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create pipe for MSR , please check the logs above");
             }
 
-            cmdFunctionType function = [&](VkCommandBuffer& cmd) -> void 
+            StreamForgeFunctionType function = [&](VkCommandBuffer& cmd) -> void 
             {
                 _implExecutePass(cmd , image , pipe.get());
             };

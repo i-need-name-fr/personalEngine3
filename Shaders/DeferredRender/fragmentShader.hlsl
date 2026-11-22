@@ -49,11 +49,11 @@ PsOutput main(VsOutput input){
     PsOutput output;
 
     // depth & position
-    output.position = float4(input.fragPos, 1.0f);
     output.depth = LinearizeDepth(input.clipPos.z , generalBuffer.playerNear , generalBuffer.playerFar);
 
     // current LUT
     LUT lut = LUT_Buffer[input.LUTindex];
+    output.position = float4(input.fragPos, float(input.LUTindex));
 
     const float3 V = normalize(generalBuffer.playerPosition - input.fragPos);
     const float3x3 TBN = input.TBN;

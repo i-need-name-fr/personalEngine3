@@ -264,7 +264,7 @@ namespace Image{
                 }
             }
 
-            cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) ->void{
+            StreamForgeFunctionType recordBuffer = [&](VkCommandBuffer &cmd) ->void{
                 // translate first barrier
                 {
                     auto barrier = translateImageUndefined(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
@@ -366,11 +366,7 @@ namespace Image{
                 vkCmdPipelineBarrier2(cmd , &dep);
             };
 
-            context->queueManager->Begin();
-
-            context->queueManager->recordCmd(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-            
-            auto result = context->queueManager->End();
+            auto result = context->executeCommand(recordBuffer , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             if(!result.has_value()){
                 return std::unexpected(result.error());
             }

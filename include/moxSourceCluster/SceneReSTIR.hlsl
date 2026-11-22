@@ -9,5 +9,8 @@
 [[vk::binding(1 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 [[vk::binding(2 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> ReSTIRPTBuffer;
 [[vk::binding(3 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> prevReSTIRPTBuffer;
+// ReSTIR SSS ( the subsurface scattering ) : the same ping pong
+[[vk::binding(4 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> ReSTIRSSBuffer;
+[[vk::binding(5 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> prevReSTIRSSBuffer;
 
 #endif
