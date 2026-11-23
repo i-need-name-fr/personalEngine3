@@ -437,7 +437,69 @@ namespace mox{
             slData.mvecScale = {1.0f , 1.0f};
             return slData;
         }
+
+        inline static constexpr float cameraNear = 0.1f;
+        inline static constexpr float cameraFar = 2000.0f;
+        glm::vec3 userPos{};
+        glm::vec3 userDir{};
+        glm::mat4 prevVP{1.0f};
+        glm::mat4 hizVP{1.0f};
+        bool hizBuiltLastFrame{false};
+
+        GeneralInfo provideGeneralInfo(const float dt , const uint32_t lightCount) noexcept
+        {
+            static bool firstIteration = true;
+
+            GeneralInfo data{};
+            const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
+
+            if(user->fixedPosition)
+            {
+                userPos = user->position; 
+                userDir = user->direction;
+            }
+
+            glm::mat4 proj = glm::perspective(glm::radians(70.0f) , aspect , cameraNear , cameraFar);
+            glm::mat4 view = glm::lookAt(user->position , user->position + user->direction , glm::vec3(0.0f , 1.0f , 0.0f));
+            data.inverseView = glm::inverse(view);
+            data.inverseProj = glm::inverse(proj);
+            data.viewProj = proj * view;
+            data.playerDirection = userDir;
+            data.playerPosition = userPos;
+            data.playerNear = cameraNear;
+            data.playerFar = cameraFar;
+            data.dt = dt;
+            data.frameIndex = sc->frameIndex;
+            data.screenWidth = sc->extent.width;
+            data.screenHeight = sc->extent.height;
+            data.viewOnly = view;
+            data.cullView = glm::lookAt(userPos , userPos + userDir , glm::vec3(0.0f , 1.0f , 0.0f));
+            data.projOnly = proj;
+            data.invViewProj = glm::inverse(data.viewProj);
+            data.lightCount = lightCount;
+            if(firstIteration) hizVP = data.viewProj;
+            else if(hizBuiltLastFrame) hizVP = prevVP;
+            hizBuiltLastFrame = !user->fixedPosition;
+            data.hizViewProj = hizVP;
+
+            if(firstIteration){
+                data.prevViewProj = data.viewProj;
+            }else{
+                data.prevViewProj = prevVP;
+            }
+
+            prevVP = data.viewProj;
+
+            if(firstIteration)
+            {
+                firstIteration = false;
+            }
+
+            return data;
+        }
     };
+
+    
 
     inline uint32_t findMemoryIndex(moxContext2* base , uint32_t index , VkMemoryPropertyFlags flags){
         VkPhysicalDeviceMemoryProperties properties{};

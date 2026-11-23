@@ -600,6 +600,7 @@ struct GeneralFeatures{
 
     uint32_t NKPD;
     uint32_t ReSTIRSSS;
+    uint32_t SHaRC;
 #else
 
     uint AO;
@@ -639,6 +640,7 @@ struct GeneralFeatures{
 
     uint32_t NKPD;
     uint32_t ReSTIRSSS;
+    uint32_t SHaRC;
 #endif
 };
 
@@ -964,7 +966,19 @@ namespace AI
     }
 }
 
+#define MOX_SHARC_LAYER_COUNT 4
+#define MOX_SHARC_RESOLUTION_DIVISOR 8
 
+namespace Sharc
+{
+    struct TableInfo
+    {
+        float cellSize;
+        uint32_t T;
+        uint32_t offset;
+        float minDistance;
+    };
+}
 
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;

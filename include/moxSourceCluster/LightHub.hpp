@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 #include "SourceCluster.hpp"
 namespace mox{

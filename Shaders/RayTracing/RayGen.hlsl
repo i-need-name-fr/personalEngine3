@@ -13,6 +13,8 @@
 #include "../../include/moxSourceCluster/LightHub.hlsl"
 #define MOX_RESTIR_INCLUDED 6
 #include "../../include/moxSourceCluster/SceneResTIR.hlsl"
+#define MOX_SHARC_HEAP_INCLUDED 7
+#include "../../include/moxSourceCluster/SharcHeap.hlsl"
 
 #define RT_SHADOW_MISS 0
 #define RT_SHADOW_HIT 0
@@ -1040,6 +1042,26 @@ float2 skyMotionVector(const float3 dir , const uint2 pixel){
     return prevUV - uv;
 }
 
+float skyVisibilityAt(const float3 P , const float3 N , inout uint seed , out float3 dir)
+{
+    const uint sampleCount = features.skyboxSampleCount;
+    // no rays : nothing says that the point is covered
+    if(sampleCount == 0u) return 1.0f;
+
+    float escaped = 0.0f;
+    [loop]
+    for(uint i = 0 ; i < sampleCount ; i++){
+        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f), 0.5f , seed );
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 100.0f);
+        if(shadow == 1.0f) 
+        {
+            escaped += 1.0f;
+            dir = direction;
+        }
+    }
+    return escaped / float(sampleCount);
+}
+
 static const float MOTION_TOLERANCE = 8.0f;
 static const float MAX_LIGHT_CONE_SIN = 0.05f;
 
@@ -1152,7 +1174,18 @@ void main()
         if(features.ReSTIRGI)
         {
             gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
+            const float3 L = normalize(gi.samplePos - info.P);
+            tdiffuseDistance = length(gi.samplePos - info.P);
+            totalIndirect = gi.radiance * gi.W * evalDiffuse(info.albedo , info.N , L , info.metallic);
         }
+        else if(features.SHaRC)
+        {
+            const uint index = Sharc::getIndex(info.P , info.N , length(generalBuffer.playerPosition - info.P));
+            const float4 sharc = Sharc::tableBuffer[index];
+            tdiffuseDistance = (sharc.a > 0.0f) ? sharc.a : 10000.0f;
+            totalIndirect = totalIndirect = sharc.xyz * info.albedo * (1.0f - info.metallic);;
+        }
+
 
         // direct
         float indirectLum = 0.0f;
@@ -1169,8 +1202,8 @@ void main()
             infoSS.roughness = ss.roughness;
             infoSS.metallic = ss.metallic;
             infoSS.V = normalize(generalBuffer.playerPosition - infoSS.P);
-
-            const float skyVisibility = skyVisibilityAt(infoSS.P , infoSS.N , load.seed);
+            float3 skyDir;
+            const float skyVisibility = skyVisibilityAt(infoSS.P , infoSS.N , load.seed , skyDir);
             if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
                 // sun
                 // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
@@ -1198,6 +1231,13 @@ void main()
                 totalSpecular += specular * diff * sunNdotL;
             }else sunShadow = 1.0f;
 
+            if(skyVisibility > 0.0f)
+            {
+                const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
+                const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
+                const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
+                totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
+            }
 
             if(tileLightCount > 0){
 
@@ -1348,8 +1388,9 @@ void main()
     
         }
         else
-        {
-            const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
+        {   
+            float3 skyDir;
+            const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed , skyDir);
             if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
                 // sun
                 // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
@@ -1383,6 +1424,14 @@ void main()
                 totalDiffuse += diffuse * diff * sunNdotL;
                 totalSpecular += specular * diff * sunNdotL;
             }else sunShadow = 1.0f;
+
+            if(skyVisibility > 0.0f)
+            {
+                const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
+                const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
+                const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
+                totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
+            }
 
             // light here should be chosen by the forward + , not world grid light poses
 
