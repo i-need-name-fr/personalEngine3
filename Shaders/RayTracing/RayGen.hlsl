@@ -137,7 +137,8 @@ float lightAttenuation(lg::LightSource light , float lightDistance){
 
 
 // ---------------------------------------------------------------- the sun disc
-static const float SUN_ANGULAR_RADIUS = 1.0f;
+// the half angle of the sun disc in RADIANS : the real sun is 0.00465 ( 0.27 degrees , about 3.6 pixels at the fov 70 ) . it was 1.0 = 57 degrees : the disc covered half of the sky
+static const float SUN_ANGULAR_RADIUS = 0.00465f;
 static const float SUN_DISC_BRIGHTNESS = 100.0f;
 static const float SUN_DISC_MAX = 60000.0f;
 
@@ -147,7 +148,12 @@ float3 sunTransmittanceToCamera(){
     return txTransmissionLUT.SampleLevel(txSampler , float2(u , v) , 0).rgb;
 }
 
+// the direct light has no hit distance : this one sets the blur of ReBLUR ( radius = distance / depth * 32 pixels , 32 at most ) . bigger = softer , the edges of the shadows get smeared ( 10 m did it ) . the noise is removed by the accumulation in time now , so the blur is small
+static const float DIRECT_BLUR_DISTANCE = 1.5f;
+
 float3 AddSunDisc(float3 skyColor , float3 rayDir){
+    // the same here : the cosine below needs a unit vector
+    rayDir = normalize(rayDir);
     const float lightLength = length(sunBuffer.direction);
     // the light is the direction where the light goes : the sun is on the other side
     if(lightLength < 1e-5f) return skyColor;
@@ -308,7 +314,7 @@ float3 stretchView(const float3 V , const float a){
 GeneralObjectInfo infoFromGBuffer(uint2 pixel){
     GeneralObjectInfo info;
     info.P = positionImage[pixel].xyz;
-    info.LUT_index = uint(positionImage[pixel].a);
+    info.LUT_index = uint(max(positionImage[pixel].a , 1.0f)) - 1u;
     info.N = normalImage[pixel].xyz;
     info.V = normalize(generalBuffer.playerPosition - info.P);
     info.albedo = albedoImage[pixel].xyz;
@@ -484,8 +490,12 @@ namespace ReSTIRGI{
     // MULTI BOUNCE : the indirect light that the hit point itself gets , taken from the reservoir of ReSTIR GI of the LAST frame . the pixel of the last frame that shows this point is
     // found by prevViewProj , and its reservoir is used only when it is the same surface ( the normal and the plane ) . DIFFUSE ONLY : the radiance of the stored sample goes through
     // the diffuse lobe of the hit ( without the albedo : computeLightAt multiplies it back at the end ) . there is no specular path : the spikes came from it
+    // the test switch : 0 - the multi bounce from the reservoirs of the last frame is OFF ( the GI rays then see only the direct light of the hit points ) . it exists only in the screen space , so it is the main difference to SHaRC
+    static const bool PREVIOUS_BOUNCE_ENABLED = true;
+
     float3 previousBounce(const GeneralObjectInfo data)
     {
+        if(!PREVIOUS_BOUNCE_ENABLED) return 0.0f;
         const float4 clipPos = mul(generalBuffer.prevViewProj , float4(data.P , 1.0f));
         if(clipPos.w <= 0.0f) return 0.0f;
 
@@ -512,24 +522,6 @@ namespace ReSTIRGI{
         // NaN is not taken , and a firefly of the last frame is limited ( it would come back through the loop )
         return sanitizeRadiance(bounce , RC::FEEDBACK_MAX_RADIANCE);
     }
-
-    // the DIFFUSE light of the hit ( the specular of the lamps and of the sun is not here : a metal has no diffuse , so it is 0 for it , the reflection ray below gives its colour )
-
-// void diskBasis(float3 N, out float3 U, out float3 V)
-// {
-//     float s = (N.z >= 0.0f) ? 1.0f : -1.0f;
-//     float a = -1.0f / (s + N.z);
-//     float b = N.x * N.y * a;
-//     U = float3(1.0f + s * N.x * N.x * a, s * b, -s * N.x);
-//     V = float3(b, s + N.y * N.y * a, -N.y);
-// }
-
-// // float3 pointU = center + U * radius;   // край диска в сторону U
-// // float3 pointV = center + V * radius;   // край диска в сторону V
-
-// // float r   = radius * sqrt(xi.x);
-// // float phi = 2.0f * PI * xi.y;
-// // float3 P  = center + U * (r * cos(phi)) + V * (r * sin(phi));
 
     float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
         // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear *
@@ -604,7 +596,6 @@ namespace ReSTIRGI{
                 result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
             }
         }else{
-            result =  0.01f;
         }
             const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
             if(sunBuffer.intensity > 0.0f){
@@ -679,7 +670,7 @@ namespace ReSTIRGI{
             const float NdotV = max(dot(info.N , V) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);
             const float3 kD = (1.0f - F);
-            res.radiance = sampleIBL(info.N) * skyVisibilityAt(info.P , info.N , seed) * kD;
+            res.radiance = sampleIBL(info.N)* kD;
             const float3 fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
             const float  p_hat = luminance(res.radiance * fcos);
             res.weightSum = p_hat / pdf;
@@ -766,8 +757,8 @@ namespace ReSTIRGI{
         r.update(prevGI , w_p , prevGI.M , rand(seed));
 
         const float p_hat = targetFunction(r , info);
-        r.W = (p_hat > 1e-3f && current.M > 0u) ? r.weightSum / p_hat :    0.0f;
-        // if(!isfinite(r.W)) r.W = 0.0f;
+        r.W = (p_hat > 0.0f && current.M > 0u) ? r.weightSum / p_hat : 0.0f;
+        if(!isfinite(r.W)) r.W = 0.0f;
         return r;
     }
 
@@ -828,6 +819,9 @@ namespace ReSTIRSSS
         const float maxR = float(ReservoirSS::maxR);
         ReservoirSS a = (ReservoirSS)0;
         a.valid = 0;
+        // a material without the subsurface scattering ( sigma = 0 , the default ) has no profile : there is nothing to sample , the pixel keeps the normal direct light .
+        // with sigma = 0 the ray was always the one along the normal from 5 m above the point : it hit whatever stands in front of the wall ( a column , a curtain ) and the light of THAT surface was used
+        if(sigma < 1e-3f) return a;
         if(r >= maxR) return a;      
         const float h = sqrt(maxR * maxR - r * r);
         float3 T , B;
@@ -841,11 +835,18 @@ namespace ReSTIRSSS
         ray.TMin = 0.0001f;
 
         HitRayPayLoad load = (HitRayPayLoad)0;
+        // the closest hit compares the LUT index of the hit with this one ( sameLUT )
+        load.LUT_index = info.LUT_index;
 
         TraceRay(TLAS , RAY_FLAG_NONE , 0x01 , RT_GI_HIT , 0 , RT_GI_MISS , ray , load);
 
+        // the ray starts up to maxR ( 5 m ) above the surface : the first thing it meets is not always the surface of the pixel ( the ceiling over a niche , a column in front of a wall ) . the sample is accepted only
+        // if it is the surface of the SAME material , it faces the same way , and it is not farther from the pixel than the profile can reach ( 6 sigma ) : the light of an unrelated surface was
+        // the dark and the bright patches of the SSS
+        const float reach = min(maxR , 6.0f * sigma + 0.05f);
+        const bool sameSurface = load.didHit && load.sameLUT && dot(load.normal , info.N) > 0.0f && length(load.worldPos - info.P) <= reach;
 
-        if(load.didHit)
+        if(sameSurface)
         {
             a.valid = 1;
             a.position = load.worldPos;
@@ -867,6 +868,8 @@ namespace ReSTIRSSS
     {
         ReservoirSS b = prevReSTIRSSBuffer[bufferIndex(prev)];
         if(!b.valid) return a;
+        // a reservoir with a NaN / Inf lives in the history forever ( the pixel stays black ) : it is not taken , the pixel starts again from the new candidate
+        if(b.M <= 0 || !isfinite(b.W) || !isfinite(b.weightSum) || !all(isfinite(b.radiance)) || !all(isfinite(b.position)) || !all(isfinite(b.normal))) return a;
         b.M = min(b.M , ReservoirSS::maxM);
 
         const float w_c = a.W * float(a.M) * p_hat_c;
@@ -881,6 +884,7 @@ namespace ReSTIRSSS
         const float g_sel = gaussianProfile(sigma , length(c.position - info.P));
         c.W = c.weightSum / (float(c.M) * max(luminance(c.radiance * g_sel) , 1e-8f));
         c.valid = 1;
+        if(!isfinite(c.W) || !all(isfinite(c.radiance))) return a;
         return c;
     }
 }
@@ -1015,6 +1019,7 @@ struct LightData{
     float3 indirect;
     float shadow;
     float diffuseHitDistance;
+    float indirectHitDistance;
     float specularHitDistance;
 };
 
@@ -1088,7 +1093,8 @@ void main()
         ndc.y = -ndc.y;
 
         float4 pos = mul(generalBuffer.inverseProj , float4(ndc , 1.0f , 1.0f));
-        float3 worldDir = mul((float3x3)generalBuffer.inverseView , pos.xyz).xyz;
+        // a UNIT vector : the cube map does not care , but AddSunDisc takes dot( rayDir , toSun ) as a cosine . a long vector made every pixel of the half of the sky that faces the sun "inside the disc"
+        float3 worldDir = normalize(mul((float3x3)generalBuffer.inverseView , pos.xyz).xyz);
         const float3 color = skybox.SampleLevel(txSampler , worldDir , 0).xyz;
         const float3 result = AddSunDisc(color , worldDir);
 
@@ -1099,6 +1105,7 @@ void main()
         load.pixelInfo.pixelType = SKYBOX_PIXEL;
         load.lightInfo.shadow = 1.0f;
         load.lightInfo.diffuseHitDistance = 10000.0f;
+        load.lightInfo.indirectHitDistance = 10000.0f;
         load.lightInfo.specularHitDistance = 10000.0f;
 
         load.pixelInfo.motionVector = skyMotionVector(worldDir , pixel);
@@ -1113,7 +1120,7 @@ void main()
         float3 finalSpecular = 0.0f;
         float3 finalIndirect = 0.0f;
         float finalShadow = 0.0f;
-        float tdiffuseDistance = 0.0f;
+        float dHit = 0.0f;
         float tspecularDistance = 0.0f;
 
         float4 clipPos = mul(generalBuffer.prevViewProj , float4(info.P , 1.0f));
@@ -1162,7 +1169,6 @@ void main()
                 const float3 weight = F_fresnel(F0 , NdotV);
                 float3 reflectedColor = radiance * weight;
 
-                // the lobe of a metal is narrow : one NaN / Inf goes through the denoiser into the history and lives there ( the whole specular goes black )
                 if(any(isnan(reflectedColor)) || any(isinf(reflectedColor))) reflectedColor = 0.0f;
                 reflectedSpecular += reflectedColor;
                 tspecularDistance = reflectionDistance;
@@ -1174,25 +1180,33 @@ void main()
         if(features.ReSTIRGI)
         {
             gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
-            const float3 L = normalize(gi.samplePos - info.P);
-            tdiffuseDistance = length(gi.samplePos - info.P);
-            totalIndirect = gi.radiance * gi.W * evalDiffuse(info.albedo , info.N , L , info.metallic);
+            if(gi.M >0)
+            {
+                const float3 L = normalize(gi.samplePos - info.P);
+                dHit = length(gi.samplePos - info.P);
+                totalIndirect = gi.radiance * gi.W * evalDiffuse(info.albedo , info.N , L , info.metallic);
+            }
         }
         else if(features.SHaRC)
-        {
-            const uint index = Sharc::getIndex(info.P , info.N , length(generalBuffer.playerPosition - info.P));
-            const float4 sharc = Sharc::tableBuffer[index];
-            tdiffuseDistance = (sharc.a > 0.0f) ? sharc.a : 10000.0f;
-            totalIndirect = totalIndirect = sharc.xyz * info.albedo * (1.0f - info.metallic);;
+        {   
+            const float d = length(generalBuffer.playerPosition - info.P);
+            const uint index = Sharc::getIndex(info.P , info.N ,d );
+            const Sharc::Reservoir sharc = Sharc::tableBuffer[index];
+            // the cache itself is noisy ( one sample per cell per frame ) : the blur never gets smaller than 1 m of the hit distance ; an empty cell gets the biggest radius
+            dHit = (sharc.valid != 0u) ? max(sharc.hitDistance , 1.0f) : 10000.0f; 
+            const float3 rad = Sharc::getGradRadiance(info.P , info.N , d);
+            totalIndirect = totalIndirect = rad * info.albedo * (1.0f - info.metallic);;
         }
 
-
         // direct
-        float indirectLum = 0.0f;
+        // the luminance of the indirect light without the albedo : it lifts the value of the shadow ( see the blends ( weight * shadow + indirectLum ) / ( indirectLum + weight ) below ) , the same as the path tracer of pe2
+        float indirectLum = luminance(totalIndirect / max(info.albedo , 1e-20));
+        if(!isfinite(indirectLum)) indirectLum = 0.0f;
+        indirectLum = max(indirectLum , 0.0f);
 
         if(features.ReSTIRSSS) ss = ReSTIRSSS::generateCandidate(info , load.seed);
         
-        if(ss.valid)
+        if(ss.valid && features.ReSTIRSSS)
         {
             const float c = 1.0f - 2.0f * LUT_Buffer[info.LUT_index].c;
 
@@ -1231,13 +1245,13 @@ void main()
                 totalSpecular += specular * diff * sunNdotL;
             }else sunShadow = 1.0f;
 
-            if(skyVisibility > 0.0f)
-            {
-                const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
-                const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
-                const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
-                totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
-            }
+            // if(skyVisibility > 0.0f)
+            // {
+            //     const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
+            //     const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
+            //     const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
+            //     totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
+            // }
 
             if(tileLightCount > 0){
 
@@ -1290,10 +1304,13 @@ void main()
                         const float reach_o = lightShadowReach(d_nonSS , light.radius , features.lightShadowFade);
                         const float falloff_o = 1.0f / (1.0f + light.Linear * d_nonSS + light.Quadratic * d_nonSS * d_nonSS);
                         const float weight = luminance(light.diffuse) * falloff_o * saturate(dot(info.N , L_nonSS)) * reach_o;
+                        if(reach <= 0.0f || weight <= 0.0f || NdotL <= 0.0f) continue;
 
                         const float3 coneSamp = sampleCone(L , cosAlpha , load.seed);
 
                         float shadow = calculateShadows(offsetRay(infoSS.P , infoSS.N , generalBuffer.playerPosition) , L , d - 0.01f);
+                        // the emission is multiplied by the WEIGHTED shadow ( the farther the light , the less the shadow counts , and the indirect light lifts it ) , not by the raw visibility
+                        shadow = (weight * shadow + indirectLum) / max(indirectLum + weight , 1e-20);
                         shadow = lerp(1.0f , shadow , reach);
 
                         // result = diffuse * light.diffuse * shadow * window * NdotL * DdotL * lightCount / max(pdf_A * d * d , 0.0001f);
@@ -1306,6 +1323,7 @@ void main()
                         const float window_o = calculateLightWindow(light , d_nonSS);
 
                         float shadow_o = calculateShadows( offsetRay(info.P , info.N , generalBuffer.playerPosition) , L_nonSS , d_nonSS - 0.01f );
+                        shadow_o = (weight * shadow_o + indirectLum) / max(indirectLum + weight , 1e-20);
                         shadow_o = lerp(1.0f , shadow_o , reach_o);
                         specular *= light.diffuse * shadow_o * DdotL_o * NdotL_o * window_o / max(pdf_A * d_nonSS * d_nonSS , 0.0001f);
 
@@ -1346,10 +1364,13 @@ void main()
                         const float reach_o = lightShadowReach(d_nonSS , light.radius , features.lightShadowFade);
                         const float falloff_o = 1.0f / (1.0f + light.Linear * d_nonSS + light.Quadratic * d_nonSS * d_nonSS);
                         const float weight = luminance(light.diffuse) * falloff_o * saturate(dot(info.N , L_nonSS)) * reach_o;
+                        if(reach <= 0.0f || weight <= 0.0f || NdotL <= 0.0f) continue;
 
                         const float3 coneSamp = sampleCone(L , cosAlpha , load.seed);
 
                         float shadow = calculateShadows(offsetRay(infoSS.P , infoSS.N , generalBuffer.playerPosition) , L , d - 0.01f);
+                        // the emission is multiplied by the WEIGHTED shadow ( the farther the light , the less the shadow counts , and the indirect light lifts it ) , not by the raw visibility
+                        shadow = (weight * shadow + indirectLum) / max(indirectLum + weight , 1e-20);
                         shadow = lerp(1.0f , shadow , reach);
 
                         // result = diffuse * light.diffuse * shadow * window * NdotL * DdotL * lightCount / max(pdf_A * d * d , 0.0001f);
@@ -1364,6 +1385,7 @@ void main()
                         const float window_o = calculateLightWindow(light , d_nonSS);
 
                         float shadow_o = calculateShadows( offsetRay(info.P , info.N , generalBuffer.playerPosition) , L_nonSS , d_nonSS - 0.01f );
+                        shadow_o = (weight * shadow_o + indirectLum) / max(indirectLum + weight , 1e-20);
                         shadow_o = lerp(1.0f , shadow_o , reach_o);
                         const float att_o = lightAttenuation(light , d_nonSS);
                         const float3 lightEmission_o = light.diffuse * att_o * NdotL_o;
@@ -1419,19 +1441,17 @@ void main()
                     // if(needSpecular) sunShadow = 1.0f;
                 }
 
-                specular = lerp(0.0f, specular , sunShadow);
-                diffuse = lerp(0.0f , diffuse , sunShadow);
-                totalDiffuse += diffuse * diff * sunNdotL;
-                totalSpecular += specular * diff * sunNdotL;
+                totalDiffuse += diffuse * diff * sunNdotL * sunShadow;
+                totalSpecular += specular * diff * sunNdotL * sunShadow;
             }else sunShadow = 1.0f;
 
-            if(skyVisibility > 0.0f)
-            {
-                const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
-                const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
-                const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
-                totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
-            }
+            // if(skyVisibility > 0.0f)
+            // {
+            //     const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
+            //     const float3 kD = (1.0f - F_fresnel(F0 , saturate(dot(info.N , info.V)))) * (1.0f - info.metallic);
+            //     const float3 color = IBL.SampleLevel(txSampler , skyDir , 0).xyz; // otherwise the skybox
+            //     totalDiffuse +=  color * saturate(dot(info.N , skyDir)) * kD * info.albedo;
+            // }
 
             // light here should be chosen by the forward + , not world grid light poses
 
@@ -1476,9 +1496,13 @@ void main()
                             const float falloff = 1.0f / (1.0f + light.Linear * d + light.Quadratic * d * d);
                             const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , L)) * reach;
                             const float3 coneSamp = sampleCone(L , cosAlpha , load.seed);
+                            if(reach <= 0.0f || weight <= 0.0f || NdotL <= 0.0f) continue;
+
                             float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , d - 0.01f);
+                            shadow = (weight * shadow + indirectLum) / max(indirectLum + weight , 1e-20);
                             shadow = lerp(1.0f , shadow , reach);
                             // result = diffuse * light.diffuse * shadow * window * NdotL * DdotL * lightCount / max(pdf_A * d * d , 0.0001f);
+
                             diffuse *= light.diffuse * shadow * DdotL * NdotL * window /  max(pdf_A * d * d , 0.0001f);
                             specular *= light.diffuse * shadow * DdotL * NdotL * window /  max(pdf_A * d * d , 0.0001f);
 
@@ -1507,30 +1531,20 @@ void main()
                             const float sinAlpha = min(light.radius / max(d , light.radius) , MAX_LIGHT_CONE_SIN);
                             const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
                             const float att = lightAttenuation(light , d);
-                            const float3 lightEmission = light.diffuse * att * NdotL;
+                            float3 lightEmission = light.diffuse * att * NdotL;
                             float3 diffuse = 0.0f , specular = 0.0f;
                             computeLight(info , dir , diffuse, specular);
-
-                            float shadowForEmission = 0.0f;
-                            [unroll]
-                            for(uint j = 0 ; j < 1 ;j++){
-                                float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
-                                const float3 coneSamp = sampleCone(L , cosAlpha , load.seed);
-                                shadowForEmission += calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , coneSamp , realDistance);
-                                currentShadow = (weight * currentShadow + indirectLum) / max(indirectLum + weight , 1e-20);
-                                shadow += clamp(currentShadow , 0.0f , 1.0f);
-                            }
-                            shadow /= float(1);
-                            shadowForEmission /= float(1);
-
+                            const float3 cone = coneSamplingVector(load.seed , L , realDistance , light.sourceRadius);
+                            shadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
+                            shadow = (weight * shadow + indirectLum) / max(indirectLum + weight , 1e-20);
+                            const float nonReachedShadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , cone , realDistance);
                             shadow = lerp(1.0f , shadow , reach);
 
-                            specular *= lerp(0.0f , lightEmission , shadowForEmission) ;
-                            diffuse *=  lerp(0.0f , lightEmission , shadowForEmission);
+                            lightEmission = lerp(0.0f , lightEmission , nonReachedShadow);
 
-                            diffuse = lerp(0.0f, diffuse , shadowForEmission);
-                            specular = lerp(0.0f , specular , shadowForEmission);
-                
+                            specular *= lightEmission * shadow;
+                            diffuse *=  lightEmission * shadow;
+
                             weightSum += weight;
                             visibleSum += weight * shadow;
                             lightLuminance += weight;
@@ -1557,9 +1571,9 @@ void main()
         if(validUV){
             const float prevShadowData = prevShadowImage[prevPixel];
             const float prevShadow = prevShadowData;
-            float count = 32.0f;
+            // the history of the shadow gets the weight 1 / MAX_SHADOW_FRAME ( the same steady state as the counter of pe2 , whose shadow image had a count of its own ) : 1 / 32 made the shadows slow and weak
+            float count = float(MAX_SHADOW_FRAME);
             const float diff = abs(prevShadow - totalShadow) * motionW;
-            count = min(count + 1u , MAX_SHADOW_FRAME);
             const float baseAlpha = 1.0f / float(count);
             const float alpha = lerp(baseAlpha , 1.0f , pow(diff , 2.0f));
             totalShadow = lerp(prevShadow , totalShadow , alpha);
@@ -1575,17 +1589,29 @@ void main()
             float r2 = length(info.P - ss.position);
             float g = gaussianProfile(sigma , r2);
             const float p_hat = luminance(ss.radiance * g);
-            const float pdf = max(g , 1e-6f);
+            // the floor of the pdf was 1e-6 : a sample farther than ~6 sigma ( g < 1e-6 ) gave W * g < 1 and faded to black , a pixel whose samples are all far stayed black for good .
+            // the floor is far lower now ( W * g stays 1 for any sample that is not zero in float )
+            const float pdf = max(g , 1e-30f);
             ss.W = 1.0f / pdf;
             ss.weightSum = p_hat / pdf;
             ss = ReSTIRSSS::temporalReuse(ss ,p_hat, prevPixel , load.seed , sigma , info);
             const float c = 1.0f - 2.0f * LUT_Buffer[info.LUT_index].c;
             r2 = length(info.P - ss.position);
             g = gaussianProfile(sigma , r2);
-            diffuseOut = ss.W * ss.radiance * g;
+            const float3 sssOut = ss.W * ss.radiance * g;
+            // NaN / Inf : the pixel keeps its own light ( without the SSS ) and the reservoir is dropped , so it does not go to the history
+            if(all(isfinite(sssOut))) diffuseOut = sssOut;
+            else ss = (ReservoirSS)0;
+        }
+        else
+        {
+            // no valid history of the pixel : nothing is stored ( a reservoir with W = 0 and valid = 1 was a black sample for the neighbours of the next frame )
+            ss.valid = 0;
         }
 
-        load.lightInfo.diffuseHitDistance = min(tdiffuseDistance , 10000.0f);
+        // the direct light ( sun , lights , SSS ) has no hit distance of its own : the soft shadows need some blur anyway , so a fixed 2 m ; the indirect one has the distance of its source
+        load.lightInfo.diffuseHitDistance = min(dHit , 10000.0f);
+        load.lightInfo.indirectHitDistance = min(max(dHit , 2.0f) , 10000.0f);
         if(!load.fromReflection) load.lightInfo.specularHitDistance = min(tspecularDistance , 10000.0f);
         if(!load.fromReflection) load.lightInfo.specularHitDistance = min(tspecularDistance , 10000.0f);
         load.pixelInfo.viewDir = info.V;
@@ -1602,7 +1628,7 @@ void main()
     specularImage[pixel]     = float4(load.lightInfo.specular , 1.0f);
     specularDistance[pixel]  = load.lightInfo.specularHitDistance;
     indirectImage[pixel]     = float4(load.lightInfo.indirect , 1.0f);
-    indirectDistance[pixel]  = load.lightInfo.diffuseHitDistance;
+    indirectDistance[pixel]  = load.lightInfo.indirectHitDistance;
     shadowImage[pixel]       = load.lightInfo.shadow;
     viewImage[pixel]         = float4(load.pixelInfo.viewDir , 1.0f);
     motionVector[pixel]      = load.pixelInfo.motionVector;

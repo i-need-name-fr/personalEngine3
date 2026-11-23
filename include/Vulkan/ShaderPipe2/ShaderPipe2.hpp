@@ -14,6 +14,8 @@ namespace mox{
         SetTypicalTransferOperators(ShaderPipe2)
 
         std::vector<pDescriptorLayout> descriptorLayouts{};
+        // ALL the layouts of the sets of the pass in the order of the SET_INDEX ( the GENERAL one and the ones of the SourceClusters , they do not belong to the pipe ) : the shader objects need all of them
+        std::vector<DescriptorLayout*> setLayouts{};
         std::vector<pShaderObject2> shaders{};
         std::vector<pDescriptorBuffer2> buffers{};
 
@@ -68,6 +70,8 @@ namespace mox{
 
         std::vector<DescriptorLayout*> getLayouts() const noexcept
         {
+            // the pass gave the whole list : the same as the pipeline layout has
+            if(!setLayouts.empty()) return setLayouts;
             if(descriptorLayouts.empty()) return {};
             std::vector<DescriptorLayout*> ls{};
             for(auto& d : descriptorLayouts)
@@ -123,6 +127,7 @@ namespace mox{
             if(this == &input) return;
             cleanPipe();
             descriptorLayouts = std::move(input.descriptorLayouts);
+            setLayouts = std::move(input.setLayouts);
             shaders = std::move(input.shaders);
             buffers = std::move(input.buffers);
             layout = std::move(input.layout);

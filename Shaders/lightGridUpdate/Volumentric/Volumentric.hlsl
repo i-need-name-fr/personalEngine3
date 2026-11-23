@@ -1,14 +1,14 @@
-#include "../../include/ShaderStructures/ShaderStructure.h"
+#include "../../../include/ShaderStructures/ShaderStructure.h"
 #define MOX_VOL_SOURCE_INCLUDED 0
-#include "../../include/moxSourceCluster/VolSource.hlsl"
+#include "../../../include/moxSourceCluster/VolSource.hlsl"
 #define MOX_SCENE_BUFFERS_INCLUDED 1
-#include "../../include/moxSourceCluster/SceneBuffers.hlsl"
+#include "../../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_LIGHT_HUB_INCLUDED 2
-#include "../../include/moxSourceCluster/LightHub.hlsl"
+#include "../../../include/moxSourceCluster/LightHub.hlsl"
 #define MOX_TEXTURE_HUB_INCLUDED 3
-#include "../../include/moxSourceCluster/TextureHub.hlsl"
+#include "../../../include/moxSourceCluster/TextureHub.hlsl"
 #define MOX_VERTEX_HEAP_INCLUDED 4
-#include "../../include/moxObject/VertexHeap.hlsl"
+#include "../../../include/moxObject/VertexHeap.hlsl"
 
 
 float sliceDepth(const float zf){

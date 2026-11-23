@@ -79,7 +79,8 @@ float computeEss(float roughness){
 
     return totalEnerty / float(NdotV_samples);
 }
-[[vk::image_format("r32f")]]
+// the format of the view : R16_SFLOAT ( SceneImages : MultiScatterRoughness ) , the format of the declaration has to be the same
+[[vk::image_format("r16f")]]
 [[vk::binding( 0 , 0)]] RWTexture1D<float> result;
 
 [shader("compute")]

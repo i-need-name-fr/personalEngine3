@@ -11,6 +11,7 @@
 
 // the g buffer and the light preparation
 #include "mDeferredPass.hpp"
+#include "mRTPass.hpp"
 #include "ForwardPlus.hpp"
 #include "AmbientOcclusion.hpp"
 
@@ -25,8 +26,9 @@
 #include "ReBLUR.hpp"
 #include "ReLAX.hpp"
 
-// the exposure , the tone mapping , the post process
+// the exposure , the tone mapping , the post process , the UI ( the last : it draws over the colour of HDR )
 #include "EVUpdatePass.hpp"
 #include "HDRAE.hpp"
 #include "HDR.hpp"
 #include "PostProcess.hpp"
+#include "GUIPass.hpp"

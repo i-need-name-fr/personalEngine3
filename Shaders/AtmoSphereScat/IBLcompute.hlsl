@@ -20,6 +20,7 @@ float3 CubemapTexelToDirection(float2 uv, uint faceIndex)
     return normalize(dir);
 }
 
+[shader("compute")]
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID){
     uint2 currentPixel = id.xy;

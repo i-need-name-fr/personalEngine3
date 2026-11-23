@@ -59,7 +59,7 @@ namespace Source
             try
             {
                 std::vector<Sharc::TableInfo> infos{};
-                std::vector<glm::vec4> radiance{};
+                std::vector<Sharc::Reservoir> radiance{};
                 for(uint32_t layer = 1 ; layer <= MOX_SHARC_LAYER_COUNT ; layer++)
                 {
                     Sharc::TableInfo info{};
@@ -75,7 +75,7 @@ namespace Source
                     for(uint32_t x = 0 ; x < info.T ; x++)
                     for(uint32_t r = 0 ; r < 8 ; r++)
                     {
-                        radiance.push_back(glm::vec4(0.0f));
+                        radiance.push_back(Sharc::Reservoir{});
                     }
                 }
                 
@@ -92,7 +92,7 @@ namespace Source
                     Buffer::DeviceReadableBuffer::CreateInfo info{};
                     info.context = context;
                     info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-                    info.size = radiance.size() * sizeof(glm::vec4);
+                    info.size = radiance.size() * sizeof(Sharc::Reservoir);
                     
                     tableBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info , Buffer::translateToSpan(radiance));
                 }

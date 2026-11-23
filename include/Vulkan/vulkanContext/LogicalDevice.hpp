@@ -239,7 +239,14 @@ namespace mox{
 
         LogicalDevice(const logicalDeviceCreateInfo& info){
             if(!info.device || !info.surface) throw std::runtime_error("couldnt create the logicalDevice , since the info is nullptr");
-            if(info.requiredForGraphics + info.requiredForMultiThread + info.forgeGraphicsQueues + info.extraGraphicsQueues > 16) throw std::runtime_error("couldnt create the logical device since the required queues is more than 16");
+            {
+                const uint32_t graphicsTotal = info.requiredForGraphics + info.requiredForMultiThread + info.forgeGraphicsQueues + info.extraGraphicsQueues;
+                if(graphicsTotal > 16)
+                {
+                    throw std::runtime_error(std::format("couldnt create the logical device since the required queues is more than 16 : graphics {} ( the engine {} + multi thread {} + StreamForge {} + Streamline {} )" ,
+                        graphicsTotal , info.requiredForGraphics , info.requiredForMultiThread , info.forgeGraphicsQueues , info.extraGraphicsQueues));
+                }
+            }
             auto result = createLogicalDevice(info.device , info.surface,  info.requiredForGraphics + info.requiredForMultiThread , info.forgeGraphicsQueues , info.forgeComputeQueues , info.extraGraphicsQueues , info.extraComputeQueues);
             if(result.has_value()){
                 ErrorDataType res = {MOX_ERROR_TYPE_SUCCESS , "logical device has been created "};

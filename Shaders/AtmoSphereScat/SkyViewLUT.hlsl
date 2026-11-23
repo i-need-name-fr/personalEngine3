@@ -79,6 +79,12 @@ void main(uint3 id : SV_DispatchThreadID){
     if (id.x >= width || id.y >= height)
         return;
 
+    // the sun is lower than 90 degrees from the zenith ( below the horizon ) : the sky has no light from it , the LUT is 0 ( the night )
+    if(skyBuffer.sunCosZenith < 0.0f){
+        skyViewLUT[id.xy] = float4(0.0f , 0.0f , 0.0f , 1.0f);
+        return;
+    }
+
     float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
 
     float azimuth = uv.x * 2.0f * PI;

@@ -404,7 +404,7 @@ float3 stretchView(const float3 V , const float a){
 GeneralObjectInfo infoFromGBuffer(uint2 pixel){
     GeneralObjectInfo info;
     info.P = positionImage[pixel].xyz;
-    info.LUT_index = uint(positionImage[pixel].a);
+    info.LUT_index = uint(max(positionImage[pixel].a , 1.0f)) - 1u;
     info.N = normalImage[pixel].xyz;
     info.V = normalize(generalBuffer.playerPosition - info.P);
     info.albedo = albedoImage[pixel].xyz;
@@ -639,7 +639,6 @@ float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float ro
             result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
         }
     }else{
-        result =  0.01f;
     }
         const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
         if(sunBuffer.intensity > 0.0f){
@@ -663,15 +662,10 @@ float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float ro
         result += sampleIBL(data.N) * skyKD * skyVisibility;
     }
 
-    {
-        const uint id = Sharc::getIndex(data.P , data.N , length(generalBuffer.playerPosition - data.P));
-        const float3 radiance = Sharc::tableBuffer[id].xyz;
-        result += radiance;
-    }
 
     result *= saveAlbedo;
 
-    return result;
+    return result; 
 }
 
 // hitDistance : how far the light comes from ( the distance to the hit , the same as diffuseDistance of the light pass ; the sky - SHARC_SKY_DISTANCE like in RayGen , where 10000 is the distance of a ray that left the scene )
@@ -709,10 +703,8 @@ float3 radianceAlong(const GeneralObjectInfo info , const float3 L , inout uint 
     return computeDiffuseLightAt(load , seed , info.roughness , info.metallic , info.P);
 }
 
-float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out float hitDistance)
+float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out float hitDistance , out float3 L , out float pdf)
 {
-    float3 L;
-    float pdf;
     hitDistance = SHARC_SKY_DISTANCE;
 
     sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
@@ -722,6 +714,8 @@ float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out float hitD
 }
 
 static const float SHARC_MAX_RADIANCE = 50.0f;
+// pixels of the screen motion at which motionW reaches 1 ( the same value as in RayGen )
+static const float MOTION_TOLERANCE = 8.0f;
 
 [shader("compute")]
 [numthreads(8 , 8 , 1)]
@@ -740,7 +734,6 @@ void main(uint3 id : SV_DispatchThreadID)
 
     initNoise(pixel , generalBuffer.frameIndex);
 
-    // the sky has no surface : nothing to write
     if(pixelCheck[pixel] != COLOR_PIXEL) return;
 
     GeneralObjectInfo info = infoFromGBuffer(pixel);
@@ -748,16 +741,46 @@ void main(uint3 id : SV_DispatchThreadID)
 
     if(isSpecularMode(info.roughness , info.metallic)) return;
 
+    const float4 prevClip = mul(generalBuffer.prevViewProj , float4(info.P , 1.0f));
+    const float2 prevNdc = prevClip.xy / prevClip.w;
+    float2 prevUV = prevNdc * 0.5f + 0.5f;
+    prevUV.y = 1.0f - prevUV.y;
+    const float2 currentUV = (float2(pixel) + 0.5f) / float2(imageResolution);
+    const float motionDist = length((prevUV - currentUV) * float2(imageResolution));
+    const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
+
     const float d = length(info.P - generalBuffer.playerPosition);
-    const uint slot = Sharc::getIndex(info.P , info.N , d);
+    const uint slot =Sharc::getIndex(info.P , info.N , d);
 
     float newDistance;
-    const float3 newRad = getRadianceFrom(info , seed , newDistance);
-    if(!all(isfinite(newRad))) return;
+    float3 L;
+    float pdf;
+    const float3 newRad = getRadianceFrom(info , seed , newDistance , L , pdf);
 
-    // rgb : the radiance , a ( alpha ) : diffuseDistance , the distance that the light came from ( the average of the last frames the same way ) . the same ratio 0.9 / 0.1 for both
-    const float4 prev = Sharc::tableBuffer[slot];
-    const float3 result = prev.xyz * 0.9f + min(newRad , float3(SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE)) * 0.1f;
-    const float distanceResult = prev.w * 0.9f + min(newDistance , SHARC_SKY_DISTANCE) * 0.1f;
-    Sharc::tableBuffer[slot] = float4(result , distanceResult);
+
+    if(!all(isfinite(newRad)) || !(pdf > 1e-6f)) return;
+
+    Sharc::Reservoir a;
+    a.valid = 1;
+    a.M = 1;
+    a.radiance = min(newRad , float3(SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE));
+    a.hitDistance = newDistance;
+    const float p_hat = luminance(a.radiance);
+    const float w = p_hat;
+    a.weightSum = w;
+    a.W = (p_hat > 1e-6f) ? 1.0f / p_hat : 0.0f;
+    if(!isfinite(w)) return;
+
+
+    Sharc::Reservoir prev = Sharc::tableBuffer[slot];
+    Sharc::Reservoir end;
+    if(prev.M > 32){ prev.weightSum *= 32.0f / float(prev.M); prev.M = 32; }
+    prev.update(a , w , motionW , rand(seed));
+    end = prev;
+    end.valid = 1u;
+    end.hitDistance = lerp(prev.hitDistance , newDistance , 0.1f);
+    const float endLum = luminance(end.radiance);
+    end.W = (endLum > 1e-6f) ? end.weightSum / (float(end.M) * endLum) : 0.0f;
+
+    Sharc::tableBuffer[slot] = end;
 }

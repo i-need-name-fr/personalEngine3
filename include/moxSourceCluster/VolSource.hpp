@@ -64,7 +64,8 @@ namespace Source
         // requestBarrier( name , stage , access ) of the base class does not know MultiViewImage2 : the volume is the whole image ( all the layers )
         MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
         {
-            if(name == "fogImageArray")
+            // the sources of the image are registered under the names of the two descriptors ( txFogImageArray - the sampled one , RWFogImageArray - the storage one ) , the .mox files ask for these
+            if(name == "fogImageArray" || name == "txFogImageArray" || name == "RWFogImageArray")
             {
                 if(!fogImageArray) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create barrier for fogImageArray in VolSource , since the image is nullptr"});
                 return fogImageArray->translateWholeImage(access , stage);
@@ -141,7 +142,12 @@ namespace Source
                 }
 
                 {
-                    const auto result = _implAddSource(fogImageArray.get() , "fogImageArray");
+                    const auto result = _implAddSource(fogImageArray.get() , "txFogImageArray");
+                    MOX_CHECK_RESULT(result)
+                }
+
+                {
+                    const auto result = _implAddSource(fogImageArray.get() , "RWFogImageArray");
                     MOX_CHECK_RESULT(result)
                 }
 

@@ -563,8 +563,21 @@ struct ForwardPlusInfo{
 // the shadow after the bilateral filter ( 1 = lit , darker = in the shadow , red = more than 1 ) : the number that PostProcess multiplies the direct light by
 #define SHADOW_MODE 8
 
-// how many modes the R key cycles through ( 0 .. SHADOW_MODE )
-#define TOTAL_VIEW_MODES 9
+// the stages of the light , one by one ( HDR.hlsl shows them instead of the lit picture ) : where does the signal become black ?
+//   DIFFUSE_MODE  : diffuseImage * albedo ( after RayGen and the denoisers , before PostProcess ) , SPECULAR_MODE : specularImage
+//   HDR_RAW_MODE  : HDRImage ( the sum of PostProcess ) without the exposure and the tone mapping
+//   OBJECT_AO_MODE: the occlusion map of the materials ( objectAOImage ) : the direct light is multiplied by it , 0 makes everything black
+#define DIFFUSE_MODE 9
+#define SPECULAR_MODE 10
+#define HDR_RAW_MODE 11
+#define OBJECT_AO_MODE 12
+// the frame counts of the temporal accumulation of ReBLUR : R = the diffuse , G = the indirect ( 0 black .. 64 frames white ) . the noise stays when the camera stands still : is the history accumulated at all ?
+#define HISTORY_COUNT_MODE 13
+// the tests of the temporal pass for the pixel ( the same as ReBLUR_temporal ) : R = the old pixel is on the screen , G = the position is the same ( < 5 cm ) and the old pixel is not the sky , B = the normal is the same . white = the history is valid
+#define HISTORY_TEST_MODE 14
+
+// how many modes the R key cycles through ( 0 .. OBJECT_AO_MODE )
+#define TOTAL_VIEW_MODES 15
 
 struct GeneralFeatures{
 #ifdef __cplusplus
@@ -978,6 +991,45 @@ namespace Sharc
         uint32_t offset;
         float minDistance;
     };
+
+    struct Reservoir
+    {
+#ifdef __cplusplus
+        alignas(16) glm::vec3 radiance;
+#else
+        float3 radiance;
+#endif
+        uint32_t M;
+        float W;
+        float weightSum;
+        uint32_t valid;
+        // the distance to the hit of the light ( the old .w of the float4 slot ) : RayGen takes the size of the blur from it . it fills the padding : the size is 32 bytes anyway
+        float hitDistance;
+
+#ifndef __cplusplus
+        void update(Reservoir can , const float canW , const float motionW , const float randValue)
+        {
+            M += can.M;
+            // if(weightSum > 0.0f && randValue * weightSum < weight){
+            // position = can.position;
+            // const float nW = saturate(dot(can.nextDir , nextDir));
+            // radiance = lerp(radiance , can.radiance * nW , 1.0f / float(M));
+            // nextDir = can.nextDir;
+            // hD = can.hD;
+            // normal = can.normal;
+
+            weightSum += canW;
+            if(weightSum > 0.0f && randValue * weightSum < canW)
+            {
+                radiance = lerp(radiance , can.radiance ,  max(motionW , 1.0f / float(M)));
+                hitDistance = can.hitDistance;
+            }
+        }
+#endif
+    };
+#ifdef __cplusplus
+    static_assert(sizeof(Reservoir) == 32 , "Sharc::Reservoir : the slot of tableBuffer is 32 bytes ( float3 + 4 words + hitDistance ) , the HLSL structure has the same layout");
+#endif
 }
 
 #ifdef __cplusplus

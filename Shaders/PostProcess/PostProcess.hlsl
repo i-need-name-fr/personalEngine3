@@ -3,9 +3,9 @@
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_SCENE_IMAGES_INCLUDED 1
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
-#define MOX_VOL_SOURCE_INCLUDED 3
+#define MOX_VOL_SOURCE_INCLUDED 2
 #include "../../include/moxSourceCluster/VolSource.hlsl"
-#define MOX_TEXTURE_HUB_INCLUDED 4
+#define MOX_TEXTURE_HUB_INCLUDED 3
 #include "../../include/moxSourceCluster/TextureHub.hlsl"
 
 static const float FOG_SKY_DISTANCE = 20000.0f;

@@ -289,6 +289,8 @@ namespace mox
             info.ranges = pushs;
             info.context = context;
             pipe->layout = std::make_shared<PipelineLayout>(info);
+            // the shader objects get the SAME list ( pSetLayouts of vkCreateShadersEXT ) : without it only the GENERAL layout was there and every set of a SourceCluster was undeclared
+            pipe->setLayouts = layouts;
 
             return {};
         }

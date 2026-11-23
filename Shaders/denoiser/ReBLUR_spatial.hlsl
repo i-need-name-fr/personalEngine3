@@ -71,8 +71,10 @@ void main(uint3 id : SV_DispatchThreadID){
     const float4 temporal = tmpDiffuseImage[id.xy];
 
     if(pixelCheck[id.xy] == SKYBOX_PIXEL){
-        // temporal wrote the count 0 for the sky : it goes to the history , so the next frame starts again
-        writeResult(id.xy , temporal.xyz , 0.0f);
+        // temporal wrote the count 0 for the sky : it goes to the history , so the next frame starts again .
+        // the COLOUR of the sky is in diffuseImage ( RayGen wrote it there ) : it is not touched , writing temporal.xyz ( 0 ) here made the sky black
+        if(push.indirect) diffuseHistoryImage[id.xy] = float4(diffuseHistoryImage[id.xy].r , 0.0f , 0.0f , 0.0f);
+        else diffuseHistoryImage[id.xy] = float4(0.0f , diffuseHistoryImage[id.xy].g , 0.0f , 0.0f);
         return;
     }
 

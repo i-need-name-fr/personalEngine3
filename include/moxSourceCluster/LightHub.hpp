@@ -108,6 +108,9 @@ namespace Source
         Buffer::pDeviceReadableBuffer tileLightIndices;
         Buffer::pDeviceReadableBuffer forwardInfo;
 
+        // GeneralFeatures::lightShadowFade : Forward+ puts a lamp into the lists of the tiles with the radius * ( 1 + fade ) , the same as lightShadowReach . the owner sets it every frame before updateGrid
+        float lightShadowFade{0.5f};
+
         [[gnu::hot]] void updateGrid(VkCommandBuffer& cmd) noexcept
         {
             _implUpdateGrid(cmd , user->position);
@@ -257,6 +260,8 @@ namespace Source
             data.TILE_PER_ROW      = tilesX;
             data.TILE_TOTAL_AMOUNT = tilesX * tilesY;
             data.totalLights       = totalLightCount;
+            // without it the fade was 0 : a tile that is out of the radius but inside of the fade lost the lamp ( a square with a hard edge , the light and the shadow ended at the border of a 16 pixel tile )
+            data.lightShadowFade   = lightShadowFade;
 
             forwardInfo->updateBufferCmd(cmd , data , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 

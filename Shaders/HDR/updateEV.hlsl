@@ -7,8 +7,13 @@ const static float adaptationLight = 3.0f;
 const static float adaptationNight = 1.5f;
 
 static const float MIDDLE_GRAY_EV = -2.474f;   // log2(0.18)
-static const float LOW_PERCENT  = 0.60f;
-static const float HIGH_PERCENT = 0.753f;
+static const float LOW_PERCENT  = 0.75f;
+static const float HIGH_PERCENT = 0.853f;
+
+// the limits of the exposure ( EV : the picture is multiplied by 2^EV ) . the night is dark : without the limit the eye adaptation lifts it up to a day picture
+// MAX_EV : how much the exposure may brighten ( 1.0 = x2 , 2.0 = x4 ) , the smaller it is the darker the night stays . MIN_EV : how much it may darken ( the bright day )
+static const float MAX_EV = 1.5f;
+static const float MIN_EV = -6.0f;
 
 // one thread , once per frame : 255 bins
 [shader("compute")]
@@ -50,7 +55,7 @@ void main()
     if(!(countedPixel > 0.0f)) return;
 
     const float averageEV = weightSum / countedPixel;
-    const float targetEV = MIDDLE_GRAY_EV - averageEV;
+    const float targetEV = clamp(MIDDLE_GRAY_EV - averageEV , MIN_EV , MAX_EV);
 
     float newEV;
     if(firstFrame)

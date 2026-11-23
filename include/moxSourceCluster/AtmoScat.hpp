@@ -72,7 +72,8 @@ namespace Source
 
         pSampler clampSampler{nullptr};
 
-        __attribute__((noreturn)) void processDelete() noexcept override
+        // NOT [[noreturn]] : the function returns , and for a function that is marked noreturn the compiler puts a trap ( int3 ) after the last line : the crash 0x80000003 on the shutdown
+        void processDelete() noexcept override
         {
             // the descriptor buffer is destroyed first ( the base class ) , then the resources it pointed to
             SourceCluster::processDelete();

@@ -78,8 +78,6 @@ void main(uint3 id : SV_DispatchThreadID){
 
     float2 uv = (float2(id.xy) + 0.5f ) / float2(screenSize);
     float2 prevUV = uv + motionVector[id.xy];
-    // the pixel of the last frame : ROUNDED to the nearest one . the plain conversion to uint cut the number off ( always towards the top left ) , so every frame the history
-    // moved half a pixel on average and a pixel that did not move at all ( mv = 1e-7 ) fell on its neighbour half of the time : the picture drifted and turned into soap
     const uint2 prevCoord = uint2(round(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f)));
 
     float3 currentSignal = readCurrent(id.xy);

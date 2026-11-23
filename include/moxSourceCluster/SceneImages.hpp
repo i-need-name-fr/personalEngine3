@@ -124,11 +124,14 @@ namespace Source
             return HiZImage->translateImage(access , stage , mipCount , mipIndex);
         }
 
+        bool historyCleared{false};
+
         void cleanImages(VkCommandBuffer& cmd) noexcept
         {
             if(!cmd || !context || !context->sc) return;
 
             const uint32_t id = static_cast<uint32_t>(context->sc->frameIndex % 2);
+            const bool firstClear = !historyCleared;
 
             const std::array<Image::RenderImage2* , 27> images = {
                 // the current half of the ping pong images
@@ -139,8 +142,12 @@ namespace Source
                 albedoImage.get() , roughnessImage.get() , metallicImage.get() , objectAOImage.get() , fShadowImage.get() , fAmbientImage.get() ,
                 finalImage.get() , motionVector.get() , viewImage.get() , guiImage.get() , guiCleanImage.get() ,
                 // the temporary and the history images
-                tmpDiffuseImage.get() , tmpSpecularImage.get() , diffuseHistoryImage.get() , specularHistoryImage.get()
+                tmpDiffuseImage.get() , tmpSpecularImage.get() ,
+                // the HISTORY images keep the frame counts of the temporal accumulation from frame to frame : they are cleared ONCE ( the first call ) . cleared every frame they were always 0 ,
+                // the counter never grew and the noise was never accumulated
+                firstClear ? diffuseHistoryImage.get() : nullptr , firstClear ? specularHistoryImage.get() : nullptr
             };
+            historyCleared = true;
 
             // one barrier for all the images : translateImage / translateImageUndefined also keep the state of the image
             const auto transition = [&](const bool fromUndefined , const VkAccessFlags2 access , const VkPipelineStageFlags2 stage) -> void
@@ -857,5 +864,7 @@ namespace Source
             return _implAddFunction(function , recordHiZFunctionName);
         }
     };
+
+    MOX_DECLARE_PTR_STRUCTURE(SceneImages)
 }
 }

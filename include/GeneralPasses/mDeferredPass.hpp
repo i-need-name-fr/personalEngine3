@@ -164,6 +164,8 @@ namespace Passes
             processDelete();
         }
 
+        Image::pRenderImage2 depthBuffer{nullptr};
+
     private:
 
         inline static constexpr float DEPTH_BIAS_CONSTANT = 1.0f;
@@ -173,7 +175,6 @@ namespace Passes
 
         pShaderPipe2 pipe{};
         CreateInfo inputData;
-        Image::pRenderImage2 depthBuffer{nullptr};
         Source::SceneImages::RecordHiZFunctionType recordHiZ{};
 
         std::array<std::array<VkRenderingAttachmentInfo , 8> , 2> attachments{};

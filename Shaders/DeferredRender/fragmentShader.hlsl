@@ -53,7 +53,8 @@ PsOutput main(VsOutput input){
 
     // current LUT
     LUT lut = LUT_Buffer[input.LUTindex];
-    output.position = float4(input.fragPos, float(input.LUTindex));
+    // w = the LUT index + 1 : w == 0 is the mark of the SKY for the denoisers / the disocclusion tests ( prevPosition.w == 0 ) . the LUT index 0 itself was a "sky" : those meshes never accumulated and were the very noisy ones . the readers subtract 1
+    output.position = float4(input.fragPos, float(input.LUTindex + 1u));
 
     const float3 V = normalize(generalBuffer.playerPosition - input.fragPos);
     const float3x3 TBN = input.TBN;

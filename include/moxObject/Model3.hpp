@@ -6,6 +6,7 @@
 #include <fastgltf/tools.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <shared_mutex>
+#include <random>
 #include <unordered_map>
 
 namespace mox
@@ -32,6 +33,20 @@ namespace mox
             float roughness{1.0f};
             float metallic{0.0f};
             bool isLight{false};
+            bool skipBlend{false};
+            // the nodes of the file that are not made at all ( by the NAME of the node ) : Intel Sponza has the node "exterior" , a simplified shell of the building ( for the light ) with a flat roof
+            // that lies over the tiles : only the ridges of the tiles were visible through it
+            std::vector<std::string> skipNodes{};
+
+            // the test of ReSTIR SSS : EVERY mesh of the model gets its own random sigma ( the width of the Gaussian profile , meters ) and its own random M ( the first Fresnel moment ) , c = 1 - 2 M .
+            // the values are in the LUT of the mesh ( lut.sigma , lut.c ) . the seed is fixed : the same picture in every run . false : c and sigma of the model are used as they are
+            bool randomSSS{false};
+            float sigmaMin{0.05f};
+            float sigmaMax{0.5f};
+            // M of the Schlick Fresnel with F0 = 0.04 is about 0.04 , so 0.02 .. 0.1 gives c = 0.8 .. 0.96
+            float momentMin{0.02f};
+            float momentMax{0.10f};
+            uint32_t sssSeed{12345u};
         };
 
         explicit Model3(const CreateInfo &info) 
@@ -98,8 +113,13 @@ namespace mox
         std::vector<pEntity> entities{};
         inline static std::optional<fastgltf::Parser> parser_{};
 
+        // the random numbers of the SSS parameters of the meshes ( one generator for the whole model : every mesh takes the next numbers )
+        std::mt19937 sssRng{};
+
         MOX_NO_DISCARD ErrorDataOutput<void> _implProcessModel(const CreateInfo& info)
         {
+            sssRng.seed(info.sssSeed);
+
             if(!parser_.has_value())
             {
                 parser_ = std::move(fastgltf::Parser());
@@ -127,6 +147,7 @@ namespace mox
                 ErrorDataOutput<void> status{};
                 fastgltf::iterateSceneNodes(asset , sceneIndex , fastgltf::math::fmat4x4() , [&](fastgltf::Node &node , const fastgltf::math::fmat4x4 &matrix) -> void {
                     if(!status.has_value() || !node.meshIndex.has_value()) return;
+                    if(std::find(info.skipNodes.begin() , info.skipNodes.end() , std::string(node.name)) != info.skipNodes.end()) return;
                     const glm::mat4 world = glm::make_mat4(matrix.data());
                     status = _implProcessMesh(asset.meshes[node.meshIndex.value()] , asset , info ,directory, world);
 
@@ -160,11 +181,25 @@ namespace mox
                     std::vector<Vertex> vertices{};
                     std::vector<uint32_t> indices{};
                     Entity::CreateInfo info{};
+                    if(input.skipBlend && prim.materialIndex.has_value() && asset.materials[prim.materialIndex.value()].alphaMode == fastgltf::AlphaMode::Blend) continue;
 
                     info.isLightObject = input.isLight;
                     info.needsTBN = true;
                     info.metallic = input.metallic;
                     info.roughness = input.roughness;
+
+                    // the subsurface scattering of the mesh ( the LUT ) : of the model , or a random one for every mesh ( the test of ReSTIR SSS )
+                    info.density = input.density;
+                    info.c = input.c;
+                    info.sigma = input.sigma;
+                    if(input.randomSSS)
+                    {
+                        const float sigma = std::uniform_real_distribution<float>(input.sigmaMin , input.sigmaMax)(sssRng);
+                        const float moment = std::uniform_real_distribution<float>(input.momentMin , input.momentMax)(sssRng);
+                        info.sigma = sigma;
+                        // the shader makes c = 1 - 2 M itself ( LUT.c is the moment M ) : c = 1 - 2 M here was applied twice ( 1 - 2 ( 1 - 2 M ) < 0 : a negative light )
+                        info.c = moment;
+                    }
                     if(!prim.indicesAccessor.has_value())
                     {
                         return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process mesh for the model , since the model doesnt have indices"});

@@ -26,6 +26,7 @@ inline int32_t translatePosToCellIndex(const float3 gridPos) {
     return int32_t(cell.x) + count * (int32_t(cell.y) + count * int32_t(cell.z));
 }
 
+#ifdef MOX_SCENE_BUFFERS_INCLUDED
 int findGridSlot(const float3 P){
     const float3 gridPos = translateToGridPos(P , generalBuffer.playerPosition);
     return translatePosToCellIndex(gridPos);
@@ -40,6 +41,7 @@ void findLightIndices(const float3 P , out uint lightIndices[lg::MAX_LIGHT_PER_C
     lightCount = min(cell.totalLightCount , (uint)lg::MAX_LIGHT_PER_CELL);
     lightIndices = cell.lightIndices;
 }
+#endif
 
 void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightCount){
     firstLight = 0;

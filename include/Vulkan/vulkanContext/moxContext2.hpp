@@ -80,7 +80,7 @@ namespace mox{
                 pDeviceInfo.surface = surface->surface;
 
                 physicalDevice = std::make_shared<PhysicalDevice>(pDeviceInfo);
-
+                std::cout << "created physical device \n";
                 LogicalDevice::logicalDeviceCreateInfo logicalInfo{};
                 logicalInfo.device = physicalDevice->device;
                 logicalInfo.surface = surface->surface;
@@ -93,6 +93,7 @@ namespace mox{
                 logicalInfo.extraComputeQueues = stream->extraComputeQueues();
 
                 logicalDevice = std::make_shared<LogicalDevice>(logicalInfo);
+                std::cout << "created logical device \n";
 
                 stream->loadDeviceProxies(logicalDevice->device);
                 {
@@ -233,23 +234,39 @@ namespace mox{
         }
 
         void processDelete() noexcept{
+            // every step is written before it starts ( the last line of the log is the one that died )
+            const auto step = [](const char* what)
+            {
+                ErrorDataType message{MOX_ERROR_TYPE_NONE , std::string("shutdown of the context : ") + what};
+                engineLogger(&message);
+            };
+
+            step("the views of the swapchain");
             for(auto& view : views){
                 vkDestroyImageView(logicalDevice->device , view , nullptr);
             }
 
             images.clear();
             views.clear();
+            step("the swapchain");
             sc = nullptr;
+            step("StreamForge");
             forge = nullptr;
+            step("the graphics queue");
             graphicsQueue = nullptr;
+            step("the memory allocator ( VMA )");
             allocator = nullptr;
+            step("Streamline");
             stream = nullptr;
+            step("the logical device");
             logicalDevice = nullptr;
+            step("the physical device , the player , the surface , the instance , the window");
             physicalDevice=  nullptr;
             user = nullptr;
             surface = nullptr;
             instance = nullptr;
             window = nullptr;
+            step("done");
         }
 
     public:
@@ -407,7 +424,7 @@ namespace mox{
             return forge->executeSingular(function , type);
         }
 
-        sl::Constants convertToConstants(const GeneralInfo& data , const glm::mat4 proj ) const noexcept
+        sl::Constants convertToConstants(const GeneralInfo& data) const noexcept
         {
             const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
 
@@ -421,7 +438,7 @@ namespace mox{
             slData.motionVectors3D = sl::Boolean::eFalse;
             slData.cameraAspectRatio = aspect;
 
-            slData.cameraViewToClip = toSl(proj);
+            slData.cameraViewToClip = toSl(data.projOnly);
             slData.clipToCameraView = toSl(data.inverseProj);
             slData.clipToPrevClip = toSl(data.prevViewProj * data.invViewProj);
             slData.prevClipToClip  = toSl(glm::inverse(data.prevViewProj * data.invViewProj));
@@ -436,7 +453,7 @@ namespace mox{
             slData.cameraPinholeOffset = {0.0f , 0.0f};
             slData.mvecScale = {1.0f , 1.0f};
             return slData;
-        }
+        }   
 
         inline static constexpr float cameraNear = 0.1f;
         inline static constexpr float cameraFar = 2000.0f;
@@ -446,14 +463,17 @@ namespace mox{
         glm::mat4 hizVP{1.0f};
         bool hizBuiltLastFrame{false};
 
-        GeneralInfo provideGeneralInfo(const float dt , const uint32_t lightCount) noexcept
+        // settings : the SETTINGS of the user ( exposure , the weights , normalMapOpenGL , ReBLUR , ReLAX ... ) , the camera and the time are written over them . without it the struct was zero :
+        // exposure 0 = the black picture
+        GeneralInfo provideGeneralInfo(const float dt , const uint32_t lightCount , const GeneralInfo& settings = GeneralInfo{}) noexcept
         {
             static bool firstIteration = true;
 
-            GeneralInfo data{};
+            GeneralInfo data = settings;
             const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
 
-            if(user->fixedPosition)
+            // F freezes the camera of the CULLING ( userPos / userDir ) : it follows the player only while NOT fixed . it was inverted : the culling camera stayed at ( 0 , 0 , 0 ) with a zero direction
+            if(!user->fixedPosition)
             {
                 userPos = user->position; 
                 userDir = user->direction;
