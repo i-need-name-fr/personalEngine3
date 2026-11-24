@@ -69,9 +69,11 @@ float3 getGradRadiance(const float3 P , const float3 N , const float d)
         // an empty slot has no light yet
         if(slotData.valid == 0u) continue;
         const float w = weights.x * weights.y * weights.z / float(info.cellSize);
-        const float3 pRad = w * slotData.radiance * (SHARC_APPLY_W ? slotData.W : 1.0f);
+        float nW = saturate(dot(N , normalize(slotData.hitPoint - P)));
+        nW = lerp(1.0f, nW, 0.5f);
+        const float3 pRad = w * slotData.radiance * (SHARC_APPLY_W ? slotData.W : 1.0f) * nW;
         radiance += pRad;
-        weightSum += w;
+        weightSum += w * nW;
     }
 
     return (weightSum > 1e-5f) ? radiance / weightSum : 0.0f;

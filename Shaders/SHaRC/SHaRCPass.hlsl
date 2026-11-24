@@ -685,9 +685,8 @@ float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float ro
 // hitDistance : how far the light comes from ( the distance to the hit , the same as diffuseDistance of the light pass ; the sky - SHARC_SKY_DISTANCE like in RayGen , where 10000 is the distance of a ray that left the scene )
 static const float SHARC_SKY_DISTANCE = 10000.0f;
 
-float3 radianceAlong(const GeneralObjectInfo info , const float3 L , inout uint seed , out float hitDistance)
+float3 radianceAlong(const GeneralObjectInfo info , const float3 L , inout uint seed , out HitRayPayLoad load)
 {
-    hitDistance = SHARC_SKY_DISTANCE;
     RayDesc ray;
     ray.TMax = 200.0f;
     ray.TMin = 0.02f;
@@ -712,19 +711,63 @@ float3 radianceAlong(const GeneralObjectInfo info , const float3 L , inout uint 
     }
 
     // the direction is normalized , so the parameter of the ray is the distance in meters
-    hitDistance = rq.CommittedRayT();
-    const HitRayPayLoad load = getHitInfo(rq.CommittedInstanceID() , rq.CommittedPrimitiveIndex() , rq.CommittedTriangleBarycentrics() , L);
+    load = getHitInfo(rq.CommittedInstanceID() , rq.CommittedPrimitiveIndex() , rq.CommittedTriangleBarycentrics() , L);
     return computeDiffuseLightAt(load , seed , info.roughness , info.metallic , info.P);
 }
 
-float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out float hitDistance , out float3 L , out float pdf)
+float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out HitRayPayLoad load , out float3 L , out float pdf)
 {
-    hitDistance = SHARC_SKY_DISTANCE;
 
     sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
     if(pdf <= 0.0f) return 0.0f;
 
-    return radianceAlong(info , L , seed , hitDistance);
+    return radianceAlong(info , L , seed , load);
+}
+
+float targetFunction(const Sharc::Reservoir r , GeneralObjectInfo info , const float3 L)
+{
+    float3 fcos;
+    if(isSpecularMode(info.roughness , info.metallic))
+    {
+        const float3 F0 = lerp(0.04 , info.albedo , info.metallic);
+        fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
+    }
+    else
+    {
+        fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
+    }
+    static const float PT_TARGET_MAX_CHANNEL = 1.0f;
+    const float3 v = r.radiance * fcos;
+    return (PT_TARGET_MAX_CHANNEL > 0.5f) ? max(v.x , max(v.y , v.z)) : luminance(v);
+}
+
+// the same , the direction is the one from x1 of info to x2 of the sample ( the shift )
+float targetFunction(const Sharc::Reservoir r , GeneralObjectInfo info)
+{
+    return targetFunction(r , info , normalize(r.hitPoint - info.P));
+}
+
+float targetFunction(const Sharc::Reservoir r , HitRayPayLoad info , const float3 L)
+{
+    float3 fcos;
+    if(isSpecularMode(info.roughness , info.metallic))
+    {
+        const float3 F0 = lerp(0.04 , info.albedo , info.metallic);
+        fcos = evalBRDF(info.normal , normalize(generalBuffer.playerPosition - info.worldPos) , L , info.roughness , F0);
+    }
+    else
+    {
+        fcos = evalDiffuse(info.albedo , info.normal , L , info.metallic);
+    }
+    static const float PT_TARGET_MAX_CHANNEL = 1.0f;
+    const float3 v = r.radiance * fcos;
+    return (PT_TARGET_MAX_CHANNEL > 0.5f) ? max(v.x , max(v.y , v.z)) : luminance(v);
+}
+
+// the same , the direction is the one from x1 of info to x2 of the sample ( the shift )
+float targetFunction(const Sharc::Reservoir r , HitRayPayLoad info)
+{
+    return targetFunction(r , info , normalize(r.hitPoint - info.worldPos));
 }
 
 // pixels of the screen motion at which motionW reaches 1 ( the same value as in RayGen )
@@ -765,11 +808,11 @@ void main(uint3 id : SV_DispatchThreadID)
     const float d = length(info.P - generalBuffer.playerPosition);
     const uint slot =Sharc::getIndex(info.P , info.N , d);
 
-    float newDistance;
+    // zeroed : when the ray leaves the scene radianceAlong returns before it fills the load
+    HitRayPayLoad load = (HitRayPayLoad)0;
     float3 L;
     float pdf;
-    const float3 newRad = getRadianceFrom(info , seed , newDistance , L , pdf);
-
+    const float3 newRad = getRadianceFrom(info , seed , load , L , pdf);
 
     if(!all(isfinite(newRad)) || !(pdf > 1e-6f)) return;
 
@@ -777,7 +820,8 @@ void main(uint3 id : SV_DispatchThreadID)
     a.valid = 1;
     a.M = 1;
     a.radiance = min(newRad , float3(SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE));
-    a.hitDistance = newDistance;
+    // the point the light comes from : the hit , or a far point of the ray that left the scene
+    a.hitPoint = load.didHit ? load.worldPos : (info.P + L * SHARC_SKY_DISTANCE);
     const float p_hat = luminance(a.radiance);
     const float w = p_hat;
     a.weightSum = w;
@@ -785,43 +829,32 @@ void main(uint3 id : SV_DispatchThreadID)
     a.W = (p_hat > 1e-6f) ? 1.0f : 0.0f;
     if(!isfinite(w)) return;
 
-
     Sharc::Reservoir prev = Sharc::tableBuffer[slot];
-    Sharc::Reservoir end;
-    static const uint SHARC_MAX_M = 256u;
-    static const float SHARC_FIREFLY_FACTOR = 4.0f;
-    static const float SHARC_FIREFLY_BIAS = 0.05f;
-    if(prev.M > SHARC_MAX_M){ prev.weightSum *= float(SHARC_MAX_M) / float(prev.M); prev.M = SHARC_MAX_M; }
+    Sharc::Reservoir b = prev;
+    Sharc::Reservoir r = (Sharc::Reservoir)0;
 
-    if(prev.M == 0)
-    {
-        end = a;
-    }
-    else
-    {
-        // the camera moves : the history of the cell is less trustworthy , its weight shrinks ( the same share of M and of weightSum )
-        const float keep = lerp(1.0f , 0.25f , motionW);
-        prev.weightSum *= keep;
-        prev.M = max(1u , (uint)(float(prev.M) * keep));
 
-        // the firefly clamp ( the same idea as the clamps of ReSTIR ) : a sample that is much brighter than the mean of the cell is scaled down , the COLOUR stays .
-        // so one bright blue sample of the sky can not break the cell
-        if(prev.M >= 4u)
-        {
-            const float meanLum = luminance(prev.radiance);
-            const float maxLum = meanLum * SHARC_FIREFLY_FACTOR + SHARC_FIREFLY_BIAS;
-            const float lumA = luminance(a.radiance);
-            if(lumA > maxLum) a.radiance *= maxLum / lumA;
-        }
-        const float wClamped = luminance(a.radiance);
+    b.M = min(b.M , 32);
 
-        end = prev;
-        end.update(a , wClamped , motionW , rand(seed));
-        end.valid = 1u;
-        end.hitDistance = lerp(prev.hitDistance , newDistance , 0.1f);
-        // the radiance already is the average : the cache is read without W ( SHARC_APPLY_W = false )
-        end.W = 1.0f;
-    }
+    const float p_hat_A_x_a = targetFunction(a , info);
+    const float p_hat_B_x_a = targetFunction(a , load);
+    const float p_hat_A_x_b = targetFunction(b , info);
+    const float p_hat_B_x_b = targetFunction(b , load);
 
-    Sharc::tableBuffer[slot] = end;
+    const float m_a = float(a.M) * p_hat_A_x_a / max(float(a.M) * p_hat_A_x_a + float(b.M) * p_hat_B_x_a , 1e-20f);
+    const float m_b = float(b.M) * p_hat_B_x_b / max(float(b.M) * p_hat_B_x_b + float(a.M) * p_hat_A_x_b , 1e-20f);
+
+    const float w_c = m_a * p_hat_A_x_a * a.W;
+    const float w_p = m_b * p_hat_A_x_b * b.W;
+
+    r.update(a , w_c , motionW , rand(seed));
+    r.update(b , w_p , motionW , rand(seed));
+
+    const float p_hat_chosen = targetFunction(r , info);
+    r.W = (p_hat_chosen > 0.0f && a.M > 0u) ? r.weightSum / (float(r.M) * p_hat_chosen) :    0.0f;
+    if(!isfinite(r.W)) r.W = 0.0f;
+
+    // the MERGED reservoir is stored ( it was b , the old value : the cache was never updated )
+    r.valid = 1u;
+    Sharc::tableBuffer[slot] = r;
 }

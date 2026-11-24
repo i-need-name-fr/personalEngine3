@@ -1193,7 +1193,7 @@ void main()
             const float d = length(generalBuffer.playerPosition - info.P);
             const uint index = Sharc::getIndex(info.P , info.N ,d );
             const Sharc::Reservoir sharc = Sharc::tableBuffer[index];
-            dHit = (sharc.valid != 0u) ? max(sharc.hitDistance , 1.0f) : 10000.0f; 
+            dHit = (sharc.valid != 0u) ? max(length(sharc.hitPoint - info.P) , 1.0f) : 10000.0f; 
             const float3 rad = Sharc::getGradRadiance(info.P , info.N , d);
             totalIndirect = rad * info.albedo * (1.0f - info.metallic);
         }

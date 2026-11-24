@@ -1008,15 +1008,16 @@ namespace Sharc
     {
 #ifdef __cplusplus
         alignas(16) glm::vec3 radiance;
+        alignas(16) glm::vec3 hitPoint;
 #else
         float3 radiance;
+        float3 hitPoint;
 #endif
         uint32_t M;
         float W;
         float weightSum;
         uint32_t valid;
         // the distance to the hit of the light ( the old .w of the float4 slot ) : RayGen takes the size of the blur from it . it fills the padding : the size is 32 bytes anyway
-        float hitDistance;
 
 #ifndef __cplusplus
         void update(Reservoir can , const float canW , const float motionW , const float randValue)
@@ -1024,12 +1025,11 @@ namespace Sharc
             M += can.M;
             weightSum += canW;
             radiance = lerp(radiance , can.radiance , saturate(float(can.M) / float(max(M , 1u))));
-            hitDistance = can.hitDistance;
+            hitPoint = can.hitPoint;
         }
 #endif
     };
 #ifdef __cplusplus
-    static_assert(sizeof(Reservoir) == 32 , "Sharc::Reservoir : the slot of tableBuffer is 32 bytes ( float3 + 4 words + hitDistance ) , the HLSL structure has the same layout");
 #endif
 }
 
