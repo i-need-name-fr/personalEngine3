@@ -242,7 +242,8 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
             const bool backFacing = dot(toMeshlet , axis) >= cutoff * length(toMeshlet) + radius;
             if(inFrustum(center , radius) && !needsToBeOccluded(float4(center , radius))) 
             {
-                visible = !backFacing;
+                // visible = !backFacing;
+                visible = true;
             }
         }
     }

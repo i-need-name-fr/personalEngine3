@@ -32,12 +32,9 @@ struct [raypayload] HitRayPayLoad{
 [shader("anyhit")]
 void main(inout HitRayPayLoad payload , in BuiltInTriangleIntersectionAttributes attr)
 {
+    // only transparent texels are skipped : the hit is NOT ended here , the ray has to find the NEAREST surface
     if(!checkTransHit(attr.barycentrics , PrimitiveIndex() , InstanceID()))
     {
         IgnoreHit();
-    }
-    else
-    {
-        AcceptHitAndEndSearch();
     }
 }

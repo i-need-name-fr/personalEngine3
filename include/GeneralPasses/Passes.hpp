@@ -19,7 +19,6 @@
 #include "RayTracing.hpp"
 #include "PathTracing.hpp"
 #include "SHaRCPass.hpp"
-#include "NRCPass.hpp"
 
 // the denoisers
 #include "BF.hpp"
@@ -32,3 +31,8 @@
 #include "HDR.hpp"
 #include "PostProcess.hpp"
 #include "GUIPass.hpp"
+#include "NRCTrain.hpp"
+#include "NRCBack.hpp"
+#include "NRCApply1.hpp"
+#include "NRCApply2.hpp"
+#include "NRCApply3.hpp"

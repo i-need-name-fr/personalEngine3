@@ -105,14 +105,13 @@ bool cullTriangle(const float4 c0 , const float4 c1 , const float4 c2)
     if(c1.w < 0.0f) return false;
     if(c2.w < 0.0f) return false;
 
-    if(tooSmall(c0 , c1 , c2)) return true;
+    // if(tooSmall(c0 , c1 , c2)) return true;
 
     const float det =
         c0.x * (c1.y * c2.w - c2.y * c1.w)
         - c0.y * (c1.x * c2.w - c2.x * c1.w)
         + c0.w * (c1.x * c2.y - c2.x * c1.y);
     return det < 0.0f;
-
 }
 
 // add Tesselation
@@ -152,6 +151,8 @@ void main(uint3 id : SV_DispatchThreadID , uint gtid : SV_GroupThreadID, uint gi
             const uint i2 = mIndices[m.firstIndex + gtid * 3 +2];
             ind[gtid] = uint3(i0 , i1 , i2);
             prims[gtid].cull = cullTriangle(sClip[i0] , sClip[i1] , sClip[i2]);
+            // prims[gtid].cull = 0;
+            
         }
 
     }

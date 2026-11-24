@@ -601,6 +601,7 @@ struct GeneralFeatures{
     uint32_t ReLAX;
 
     uint32_t NRC;
+    uint32_t NRCFull;
     uint32_t currentMode;
     uint32_t randomValues;
     uint32_t volumentricFog;
@@ -614,6 +615,12 @@ struct GeneralFeatures{
     uint32_t NKPD;
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
+
+    // the multiplier of the sigma of the subsurface scattering of EVERY material ( ReSTIR SSS ) : 1 = the sigma of the material , the bigger the wider the scattering ( the debug : to see the effect on a scene of meters ) .
+    // the two floats after it are the padding : the HLSL constant buffer is rounded to 16 bytes , the size of the C++ structure is now 28 words = 112 bytes , the same
+    float sssScale;
+    float padding0;
+    float padding1;
 #else
 
     uint AO;
@@ -634,6 +641,7 @@ struct GeneralFeatures{
     uint32_t ReLAX;
 
     uint NRC;
+    uint32_t NRCFull;
 
     uint currentMode;
 
@@ -654,6 +662,10 @@ struct GeneralFeatures{
     uint32_t NKPD;
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
+
+    float sssScale;
+    float padding0;
+    float padding1;
 #endif
 };
 
@@ -880,7 +892,7 @@ namespace ms
 #define MOX_NRC_MAX_BOUNCE_COUNT 3ul
 #define MOX_NRC_MAX_HASH_GRID_SIZE 4ul
 #define MOX_NRC_HASH_GRID_F 2ul
-#define MOX_NRC_RESOLUTION_DIVISOR 8ul
+#define MOX_NRC_RESOLUTION_DIVISOR 16ul
 
 namespace AI
 {

@@ -13,6 +13,9 @@
 #include "../../include/moxSourceCluster/LightHub.hlsl"
 #define MOX_SHARC_HEAP_INCLUDED 6
 #include "../../include/moxSourceCluster/SharcHeap.hlsl"
+#define MOX_NRC_INCLUDED 7
+#include "../../include/AI/CoopVec.hlsl"
+#include "../../include/AI/NRC/NRC.hlsl"
 
 uint pickRandomNumber(inout uint seed , uint totalCount){
     return uint(float(totalCount) * rand(seed));
@@ -30,10 +33,7 @@ struct [raypayload] HitRayPayLoad{
     // true if the hit has the same LUT_index as the caller ( the closesthit writes it , the miss writes false )
     bool   sameLUT;
 };
-// all ReSTIR SSS
 
-// TODO
-// add here the NRC 
 
 uint bufferIndex(uint2 pixel){
     const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
@@ -568,6 +568,8 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
 }
 
 
+static const float SHARC_MAX_RADIANCE = 50.0f;
+
 float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
     // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear *
     if(!info.didHit){
@@ -662,10 +664,19 @@ float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float ro
         result += sampleIBL(data.N) * skyKD * skyVisibility;
     }
 
+    if(!features.NRC){
+        const float hitDistance = length(data.P - generalBuffer.playerPosition);
+        const float3 cached = Sharc::getGradRadiance(data.P , data.N , hitDistance) * (1.0f - data.metallic);
+        if(all(isfinite(cached))) result += min(cached , float3(SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE , SHARC_MAX_RADIANCE));
+    }
+    else
+    {
+        result += AI::NRC::askNRC(data.P , data.N);
+    }
 
     result *= saveAlbedo;
 
-    return result; 
+    return result;
 }
 
 // hitDistance : how far the light comes from ( the distance to the hit , the same as diffuseDistance of the light pass ; the sky - SHARC_SKY_DISTANCE like in RayGen , where 10000 is the distance of a ray that left the scene )
@@ -713,7 +724,6 @@ float3 getRadianceFrom(GeneralObjectInfo info , inout uint seed , out float hitD
     return radianceAlong(info , L , seed , hitDistance);
 }
 
-static const float SHARC_MAX_RADIANCE = 50.0f;
 // pixels of the screen motion at which motionW reaches 1 ( the same value as in RayGen )
 static const float MOTION_TOLERANCE = 8.0f;
 
@@ -768,7 +778,7 @@ void main(uint3 id : SV_DispatchThreadID)
     const float p_hat = luminance(a.radiance);
     const float w = p_hat;
     a.weightSum = w;
-    a.W = (p_hat > 1e-6f) ? 1.0f / p_hat : 0.0f;
+    a.W = (p_hat > 0.0f) ? 1.0f / p_hat : 0.0f;
     if(!isfinite(w)) return;
 
 

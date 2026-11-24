@@ -246,11 +246,9 @@ namespace mox
         MOX_NO_DISCARD ErrorDataOutput<void> processPipe(ShaderPipe2* pipe , VkShaderStageFlags stage , std::vector<VkPushConstantRange> pushs = {}) noexcept
         {
 
-            // lets first of get from file the exact position of each set
             const std::size_t size = moxFILE.value().sets.size();
             std::vector<DescriptorLayout*> layouts(size);
 
-            // the sets of the pipeline layout are numbered 0 .. N-1 without gaps ( GENERAL is the first one , 0 ) , a gap would be a nullptr layout , and an index >= N would write behind the vector
             {
                 std::vector<uint8_t> used(size , 0);
                 for(const auto& data : moxFILE.value().sets)
@@ -289,7 +287,6 @@ namespace mox
             info.ranges = pushs;
             info.context = context;
             pipe->layout = std::make_shared<PipelineLayout>(info);
-            // the shader objects get the SAME list ( pSetLayouts of vkCreateShadersEXT ) : without it only the GENERAL layout was there and every set of a SourceCluster was undeclared
             pipe->setLayouts = layouts;
 
             return {};

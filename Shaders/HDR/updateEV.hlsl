@@ -10,9 +10,7 @@ static const float MIDDLE_GRAY_EV = -2.474f;   // log2(0.18)
 static const float LOW_PERCENT  = 0.75f;
 static const float HIGH_PERCENT = 0.853f;
 
-// the limits of the exposure ( EV : the picture is multiplied by 2^EV ) . the night is dark : without the limit the eye adaptation lifts it up to a day picture
-// MAX_EV : how much the exposure may brighten ( 1.0 = x2 , 2.0 = x4 ) , the smaller it is the darker the night stays . MIN_EV : how much it may darken ( the bright day )
-static const float MAX_EV = 1.5f;
+static const float MAX_EV = 2.0f;
 static const float MIN_EV = -6.0f;
 
 // one thread , once per frame : 255 bins
@@ -20,7 +18,6 @@ static const float MIN_EV = -6.0f;
 [numthreads(1 , 1 , 1)]
 void main()
 {
-    // the bin 0 is the black one , it is not counted
     uint total = 0;
     for(uint i = 1 ; i < 256 ; i++) total += histoGram[i];
 
@@ -46,12 +43,10 @@ void main()
         countedPixel += inWindow;
         running += nf;
 
-        // the bin is read for the last time : the histogram of the next frame starts from zero
         histoGram[b] = 0;
     }
     histoGram[0] = 0;
 
-    // the histogram is already cleared above , so this return does not leave old data
     if(!(countedPixel > 0.0f)) return;
 
     const float averageEV = weightSum / countedPixel;

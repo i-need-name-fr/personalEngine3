@@ -15,6 +15,9 @@
 #include "../../include/moxSourceCluster/SceneResTIR.hlsl"
 #define MOX_SHARC_HEAP_INCLUDED 7
 #include "../../include/moxSourceCluster/SharcHeap.hlsl"
+#define MOX_NRC_INCLUDED 8
+#include "../../include/AI/CoopVec.hlsl"
+#include "../../include/AI/NRC/NRC.hlsl"
 
 #define RT_SHADOW_MISS 0
 #define RT_SHADOW_HIT 0
@@ -482,15 +485,6 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
 
 namespace ReSTIRGI{
 
-
-
-
-
-    // next task is to fix the sun shadows
-    // MULTI BOUNCE : the indirect light that the hit point itself gets , taken from the reservoir of ReSTIR GI of the LAST frame . the pixel of the last frame that shows this point is
-    // found by prevViewProj , and its reservoir is used only when it is the same surface ( the normal and the plane ) . DIFFUSE ONLY : the radiance of the stored sample goes through
-    // the diffuse lobe of the hit ( without the albedo : computeLightAt multiplies it back at the end ) . there is no specular path : the spikes came from it
-    // the test switch : 0 - the multi bounce from the reservoirs of the last frame is OFF ( the GI rays then see only the direct light of the hit points ) . it exists only in the screen space , so it is the main difference to SHaRC
     static const bool PREVIOUS_BOUNCE_ENABLED = true;
 
     float3 previousBounce(const GeneralObjectInfo data)
@@ -524,7 +518,6 @@ namespace ReSTIRGI{
     }
 
     float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
-        // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear *
         if(!info.didHit){
             return 0.0f;
         }
@@ -595,21 +588,21 @@ namespace ReSTIRGI{
                 diffuse /= saveAlbedo;
                 result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
             }
-        }else{
         }
-            const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
-            if(sunBuffer.intensity > 0.0f){
-                float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
-                // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
-                const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-                // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
-                float sunShadow = 0.0f;
-                if(skyVisibility > 0.0f){
-                    sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
-                }
-                computeLight(data , L , sunDiffuse , sunSpecular);
-                sunDiffuse /= saveAlbedo;
-                result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+
+        const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
+        if(sunBuffer.intensity > 0.0f){
+            float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+            // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
+            const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
+            // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+            float sunShadow = 0.0f;
+            if(skyVisibility > 0.0f){
+                sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            }
+            computeLight(data , L , sunDiffuse , sunSpecular);
+            sunDiffuse /= saveAlbedo;
+            result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
         }
 
         // the light of the sky : only under the open sky ( skyVisibility > 0 )
@@ -622,7 +615,15 @@ namespace ReSTIRGI{
             result += sampleIBL(data.N) * skyKD * skyVisibility;
         }
 
-        result += previousBounce(data);
+        if(!features.NRC)
+        {
+            result += previousBounce(data);
+        }
+        else
+        {
+            result += AI::NRC::askNRC(data.P , data.N);
+        }
+
 
         result *= saveAlbedo;
 
@@ -814,7 +815,7 @@ namespace ReSTIRSSS
         const float u1 = clamp(rand(seed) , 0.0f , 0.999f);
         const float u2 = rand(seed);
         const LUT lut = LUT_Buffer[info.LUT_index];
-        const float sigma = lut.sigma;
+        const float sigma = lut.sigma * features.sssScale;
         const float r = sigma * sqrt(max(-2.0f * log(1.0f - u1) , 0.0f));
         const float maxR = float(ReservoirSS::maxR);
         ReservoirSS a = (ReservoirSS)0;
@@ -1195,14 +1196,16 @@ void main()
             // the cache itself is noisy ( one sample per cell per frame ) : the blur never gets smaller than 1 m of the hit distance ; an empty cell gets the biggest radius
             dHit = (sharc.valid != 0u) ? max(sharc.hitDistance , 1.0f) : 10000.0f; 
             const float3 rad = Sharc::getGradRadiance(info.P , info.N , d);
-            totalIndirect = totalIndirect = rad * info.albedo * (1.0f - info.metallic);;
+            totalIndirect = totalIndirect = rad * info.albedo * (1.0f - info.metallic);
+        }
+        else if(features.NRCFull)
+        {
+            totalIndirect = AI::NRC::askNRC(info.P , info.N) * info.albedo * (1.0f - info.metallic);
+            dHit = 10.0f;
         }
 
-        // direct
-        // the luminance of the indirect light without the albedo : it lifts the value of the shadow ( see the blends ( weight * shadow + indirectLum ) / ( indirectLum + weight ) below ) , the same as the path tracer of pe2
-        float indirectLum = luminance(totalIndirect / max(info.albedo , 1e-20));
+        float indirectLum = 0.0f;
         if(!isfinite(indirectLum)) indirectLum = 0.0f;
-        indirectLum = max(indirectLum , 0.0f);
 
         if(features.ReSTIRSSS) ss = ReSTIRSSS::generateCandidate(info , load.seed);
         
@@ -1585,7 +1588,7 @@ void main()
         if(ss.valid && validUV)
         {
             ss.radiance = diffuseOut;
-            const float sigma = LUT_Buffer[info.LUT_index].sigma;
+            const float sigma = LUT_Buffer[info.LUT_index].sigma * features.sssScale;
             float r2 = length(info.P - ss.position);
             float g = gaussianProfile(sigma , r2);
             const float p_hat = luminance(ss.radiance * g);

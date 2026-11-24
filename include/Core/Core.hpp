@@ -38,6 +38,7 @@ namespace mox
             Source::pTextureHub textures{};
             Source::pAtmoScat atmo{};
             Source::pSharcHeap sharc{};
+            Source::AI::pNeuralRadianceCache nrc{};
         } sources;
 
 
@@ -133,11 +134,16 @@ namespace mox
             ao = nullptr;
             forward = nullptr;
             deferred = nullptr;
+            nrct = nullptr;
+            nrcb = nullptr;
+            nrcp1 = nullptr;
+            nrcp2 = nullptr;
+            nrcp3 = nullptr;
 
             step("the graph");
             graph = RenderGraph{};
             recordFunction = {};
-
+            sources.nrc = nullptr;
             step("the sky manager");
             skyManager = nullptr;
             step("the entity forge ( the models and the heap )");
@@ -255,6 +261,10 @@ namespace mox
                         info.txHub = sources.textures.get();
                         info.lHub = sources.lights.get();
                         eForge = std::make_shared<utils::EntityForge>(info);
+                    }
+
+                    {
+                        sources.nrc = std::make_shared<Source::AI::NeuralRadianceCache>(context.get());
                     }
                 }
             }
@@ -381,7 +391,8 @@ namespace mox
                 lights[0].position = {-44.6 , 20.6 , -0.3f};
                 lights[1].position = {6.1 , 21.1 , -0.9};
                 lights[2].position = {-44.8 , 35.1 , 0.1};
-
+                lights[3].position = {-19.0 , 20.1 , -14.7};
+                lights[4].position = {-19.2 , 18.2 , 12.9};
 
                 for(uint32_t i = 0 ; i < lights.size() ; i++){
                     sources.lights->addLight(lights[i] , std::format("light_{}" , i));
@@ -409,7 +420,7 @@ namespace mox
                 {
                     SourceCluster* clusters[] = {
                         sources.buffers.get() , sources.images.get() , sources.atmo.get() , eForge->heap.get() , sources.textures.get() ,
-                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get()
+                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get() , sources.nrc.get()
                     };
 
                     for(SourceCluster* cluster : clusters)
@@ -535,15 +546,50 @@ namespace mox
                 }
 
                 {
+                    Passes::NRCTrain::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NRC/trainingShader";
+                    nrct = std::make_shared<Passes::NRCTrain>(info);
+                }
+
+                {
+                    Passes::NRCBack::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NRC/backstepShader";
+                    nrcb = std::make_shared<Passes::NRCBack>(info);
+                }
+
+                {
+                    Passes::NRCApply1::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NRC/applyHidden";
+                    nrcp1 = std::make_shared<Passes::NRCApply1>(info);
+                }
+
+                {
+                    Passes::NRCApply2::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NRC/applyOutput";
+                    nrcp2 = std::make_shared<Passes::NRCApply2>(info);
+                }
+
+                {
+                    Passes::NRCApply3::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NRC/applyHash";
+                    nrcp3 = std::make_shared<Passes::NRCApply3>(info);
+                }
+
+                {
                     Passes::GUIPass::CreateInfo info{};
                     info.context = ctx;
                     info.path_S = "../Shaders/GUI/GUIPass";
                     guiPass = std::make_shared<Passes::GUIPass>(info);
                 }
-
+                
                 {
                     NodePass* order[] = {
-                        deferred.get() , mrt.get() , forward.get() , sharcPass.get() , rt.get() , ao.get() , bf.get() ,
+                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , rt.get() , ao.get() , bf.get() ,
                         reblurt.get() , reblurs.get() , reblurt_indirect.get() , reblurs_indirect.get() ,
                         relaxt.get() , relaxs.get() ,
                         pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
@@ -585,17 +631,14 @@ namespace mox
         void update(VkCommandBuffer& cmd)
         {
             GeneralFeatures& features = featureSettings;
-            // the view mode : R of the Player cycles it ( albedo , normal , depth , metallic , roughness , ... ) , HDR.hlsl shows the buffer of the mode instead of the lit picture . it was not copied into the
             // features : R did nothing
             features.currentMode = context->user->currentMode;
             FogVolume& fogData = fogSettings;
             SkyViewData& skyData = skySettings;
             SunSource& sun = sunSettings;
-            // the settings are the base ( exposure , the weights , the flags of the denoisers ) : the GUI changes them , and the changes stay for the next frame
             GeneralInfo data = context->provideGeneralInfo(dt , lightCount , generalSettings);
             drawImGui(data , features , fogData , skyData , sun);
             generalSettings = data;
-            // the denoiser passes ask GeneralFeatures ( requestExecution ) , the checkboxes change GeneralInfo ( the shaders read it ) : the features were never set , so the passes never ran at all
             features.ReBLUR = data.ReBLUR;
             features.ReLAX = data.ReLAX;
             sl::Constants slData = context->convertToConstants(data);
@@ -618,6 +661,9 @@ namespace mox
                 }
             }
             translateRecords(deferred->depthBuffer.get() , sources.images->motionVector.get() , sources.images->finalImage.get() , sources.images->guiCleanImage.get());
+
+            const auto frameGeneration = context->stream->setFrameGeneration();
+            if(!frameGeneration.has_value()) engineLogger(frameGeneration);
 
             sources.buffers->generalBuffer->updateBufferCmd(cmd ,data , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.buffers->sunBuffer->updateBufferCmd(cmd ,sun , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
@@ -662,6 +708,7 @@ namespace mox
             featureSettings.sunShadowFade = 200.0f;
             featureSettings.NRC = false;
             featureSettings.ReSTIRSSS = true;
+            featureSettings.sssScale = 1.0f;
 
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
@@ -959,6 +1006,8 @@ namespace mox
                 {
                     info.ReSTIRSSS = !info.ReSTIRSSS;
                 }
+                // the multiplier of the sigma of all the materials : to SEE the scattering on a scene of meters ( the sigma of a skin is 1 cm )
+                gui::SliderFloat("SSS scale" , &info.sssScale , 0.1f , 100.0f , "%.2f" , ImGuiSliderFlags_Logarithmic);
             }
 
             gui::Separator();
@@ -976,7 +1025,7 @@ namespace mox
                     {
                         if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
                             info.ReSTIRGI = !info.ReSTIRGI;
-                            info.NRC = false;
+                            info.NRCFull = false;
                             info.SHaRC = false;
                         }
                     }
@@ -995,7 +1044,7 @@ namespace mox
                         if(gui::Button(info.SHaRC ? "SHaRC: ON" : "SHaRC: OFF")){
                             info.SHaRC = !info.SHaRC;
                             info.ReSTIRGI = false;
-                            info.NRC = false;
+                            info.NRCFull = false;
                         }
                     }
 
@@ -1004,13 +1053,22 @@ namespace mox
                     {
                         if(gui::Button(info.NRC ? "NRC ON" : "NRC OFF"))
                         {
-                            info.ReSTIRGI = false;
-                            info.SHaRC = false;
                             info.NRC = !info.NRC;
                         }
                     }
                     gui::EndDisabled();
                     gui::Separator();
+
+                    gui::BeginDisabled(!info.RT);
+                    {
+                        if(gui::Button(info.NRCFull ? "NRCFull ON" : "NRCFull OFF"))
+                        {
+                            info.NRCFull = !info.NRCFull;
+                            info.NRC = false;
+                            info.SHaRC = false;
+                        }
+                    }
+                    gui::EndDisabled();
 
                 }
             }
@@ -1051,8 +1109,6 @@ namespace mox
             if(result != sl::Result::eOk) std::cout << "slSetTagForFrame failed , result = " << static_cast<int>(result) << "\n";
         }
 
-        // an error of a pass in the frame : it was swallowed ( the command buffer was just ended ) , so the image stayed black and nothing was in the log . the same message is logged only once ,
-        // a frame is repeated many times per second
         std::string lastFrameError{};
 
         void logFrameError(const ErrorDataOutput<void>& result) noexcept
@@ -1207,11 +1263,17 @@ namespace mox
         Passes::pmRTPass mrt{};
         Passes::pRayTracing rt{};
 
+        Passes::pNRCTrain nrct{};
+        Passes::pNRCBack nrcb{};
+        Passes::pNRCApply1 nrcp1{};
+        Passes::pNRCApply2 nrcp2{};
+        Passes::pNRCApply3 nrcp3{};
+
         Passes::pGUIPass guiPass{};
 
         QueueRecordTypeFunction recordFunction{};
 
-        static constexpr uint32_t intelLampCount = 3;
+        static constexpr uint32_t intelLampCount = 5;
         static constexpr uint32_t lightCount = intelLampCount;
         float dt{0.0f};
         GeneralInfo generalSettings{};
