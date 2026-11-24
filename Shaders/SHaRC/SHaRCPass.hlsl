@@ -570,6 +570,11 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
 
 static const float SHARC_MAX_RADIANCE = 50.0f;
 
+// the TEST switches : which part of the light of a hit point is blue ? 0 turns the part OFF ( computeDiffuseLightAt ) . all 1 = the normal picture
+static const bool SHARC_HIT_IBL = true;
+// the sky that a ray sees when it leaves the scene ( radianceAlong ) : 0 = the miss gives black
+static const bool SHARC_MISS_SKY = true;
+
 float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
     // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear *
     if(!info.didHit){
@@ -640,28 +645,26 @@ float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float ro
             diffuse /= saveAlbedo;
             result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
         }
-    }else{
-    }
-        const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
-        if(sunBuffer.intensity > 0.0f){
-            float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
-            const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-            float sunShadow = 0.0f;
-            if(skyVisibility > 0.0f){
-                sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
-            }
-            computeLight(data , L , sunDiffuse , sunSpecular);
-            sunDiffuse /= saveAlbedo;
-            result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
     }
 
-    if(skyVisibility > 0.0f){
+    const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
+    if(sunBuffer.intensity > 0.0f){
+        float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+        const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
+        float sunShadow = 0.0f;
+        if(skyVisibility > 0.0f){
+            sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        }
+        computeLight(data , L , sunDiffuse , sunSpecular);
+        sunDiffuse /= saveAlbedo;
+        result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+        
         const float3 skyV = normalize(x1Pos - data.P);
         const float3 skyF0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
         const float skyNdotV = max(dot(data.N , skyV) , 0.0001f);
         const float3 skyF = F_fresnel(skyF0 , skyNdotV);
         const float3 skyKD = (1.0f - skyF) * (1.0f - data.metallic);
-        result += sampleIBL(data.N) * skyKD * skyVisibility;
+        result += sampleIBL(data.N) * skyKD * skyVisibility * (SHARC_HIT_IBL ? 1.0f : 0.0f);
     }
 
     if(!features.NRC){
@@ -705,7 +708,7 @@ float3 radianceAlong(const GeneralObjectInfo info , const float3 L , inout uint 
 
     if(rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
     {
-        return skybox.SampleLevel(txSampler , L , 2.0f).xyz * sunBuffer.intensity;
+        return SHARC_MISS_SKY ? skybox.SampleLevel(txSampler , L , 2.0f).xyz * sunBuffer.intensity : 0.0f;
     }
 
     // the direction is normalized , so the parameter of the ray is the distance in meters
@@ -778,19 +781,47 @@ void main(uint3 id : SV_DispatchThreadID)
     const float p_hat = luminance(a.radiance);
     const float w = p_hat;
     a.weightSum = w;
-    a.W = (p_hat > 0.0f) ? 1.0f / p_hat : 0.0f;
+    // one sample : weightSum / ( M * lum ) = 1 ( the first write of an empty cell is read with this W )
+    a.W = (p_hat > 1e-6f) ? 1.0f : 0.0f;
     if(!isfinite(w)) return;
 
 
     Sharc::Reservoir prev = Sharc::tableBuffer[slot];
     Sharc::Reservoir end;
-    if(prev.M > 32){ prev.weightSum *= 32.0f / float(prev.M); prev.M = 32; }
-    prev.update(a , w , motionW , rand(seed));
-    end = prev;
-    end.valid = 1u;
-    end.hitDistance = lerp(prev.hitDistance , newDistance , 0.1f);
-    const float endLum = luminance(end.radiance);
-    end.W = (endLum > 1e-6f) ? end.weightSum / (float(end.M) * endLum) : 0.0f;
+    static const uint SHARC_MAX_M = 256u;
+    static const float SHARC_FIREFLY_FACTOR = 4.0f;
+    static const float SHARC_FIREFLY_BIAS = 0.05f;
+    if(prev.M > SHARC_MAX_M){ prev.weightSum *= float(SHARC_MAX_M) / float(prev.M); prev.M = SHARC_MAX_M; }
+
+    if(prev.M == 0)
+    {
+        end = a;
+    }
+    else
+    {
+        // the camera moves : the history of the cell is less trustworthy , its weight shrinks ( the same share of M and of weightSum )
+        const float keep = lerp(1.0f , 0.25f , motionW);
+        prev.weightSum *= keep;
+        prev.M = max(1u , (uint)(float(prev.M) * keep));
+
+        // the firefly clamp ( the same idea as the clamps of ReSTIR ) : a sample that is much brighter than the mean of the cell is scaled down , the COLOUR stays .
+        // so one bright blue sample of the sky can not break the cell
+        if(prev.M >= 4u)
+        {
+            const float meanLum = luminance(prev.radiance);
+            const float maxLum = meanLum * SHARC_FIREFLY_FACTOR + SHARC_FIREFLY_BIAS;
+            const float lumA = luminance(a.radiance);
+            if(lumA > maxLum) a.radiance *= maxLum / lumA;
+        }
+        const float wClamped = luminance(a.radiance);
+
+        end = prev;
+        end.update(a , wClamped , motionW , rand(seed));
+        end.valid = 1u;
+        end.hitDistance = lerp(prev.hitDistance , newDistance , 0.1f);
+        // the radiance already is the average : the cache is read without W ( SHARC_APPLY_W = false )
+        end.W = 1.0f;
+    }
 
     Sharc::tableBuffer[slot] = end;
 }

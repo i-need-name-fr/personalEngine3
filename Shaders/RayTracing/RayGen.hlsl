@@ -1193,10 +1193,9 @@ void main()
             const float d = length(generalBuffer.playerPosition - info.P);
             const uint index = Sharc::getIndex(info.P , info.N ,d );
             const Sharc::Reservoir sharc = Sharc::tableBuffer[index];
-            // the cache itself is noisy ( one sample per cell per frame ) : the blur never gets smaller than 1 m of the hit distance ; an empty cell gets the biggest radius
             dHit = (sharc.valid != 0u) ? max(sharc.hitDistance , 1.0f) : 10000.0f; 
             const float3 rad = Sharc::getGradRadiance(info.P , info.N , d);
-            totalIndirect = totalIndirect = rad * info.albedo * (1.0f - info.metallic);
+            totalIndirect = rad * info.albedo * (1.0f - info.metallic);
         }
         else if(features.NRCFull)
         {

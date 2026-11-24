@@ -3,6 +3,9 @@
 #if defined(MOX_SHARC_HEAP_INCLUDED) && MOX_SHARC_HEAP_INCLUDED >= 0 && defined(MOX_SHADER_STRUCTURES)
 namespace Sharc
 {
+// the TEST switch : 0 - the cache gives the radiance as it is ( without the factor W of the reservoir ) , the same for RayGen and for SHaRCPass
+static const bool SHARC_APPLY_W = false;
+
 [[vk::binding(    1   ,     MOX_SHARC_HEAP_INCLUDED     )]] RWStructuredBuffer<Sharc::TableInfo> tableInfoBuffer;
 [[vk::binding(    0   ,     MOX_SHARC_HEAP_INCLUDED     )]] RWStructuredBuffer<Sharc::Reservoir> tableBuffer;
 
@@ -66,7 +69,7 @@ float3 getGradRadiance(const float3 P , const float3 N , const float d)
         // an empty slot has no light yet
         if(slotData.valid == 0u) continue;
         const float w = weights.x * weights.y * weights.z / float(info.cellSize);
-        const float3 pRad = w * slotData.radiance * slotData.W;
+        const float3 pRad = w * slotData.radiance * (SHARC_APPLY_W ? slotData.W : 1.0f);
         radiance += pRad;
         weightSum += w;
     }

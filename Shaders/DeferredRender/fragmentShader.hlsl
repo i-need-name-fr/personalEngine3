@@ -74,6 +74,10 @@ PsOutput main(VsOutput input){
         output.normal = float4(input.normal , 1.0f);
     }
 
+    // the culling of the back faces is OFF ( taskShader / meshShader ) : a back face of a two sided surface has the normal that looks AWAY from the viewer . the indirect light is read by the normal
+    // ( SHaRC : the octant of the cell ; the shadows ; the diffuse ) , so the light of the OTHER side of the wall ( the open sky , a lamp ) came in . the normal looks at the viewer , like the normal of a hit of a ray does
+    if(dot(output.normal.xyz , V) < 0.0f) output.normal.xyz = -output.normal.xyz;
+
     if(lut.diffuseID != NON_VALID_SLOT){
         const uint id = txVirtualBuffer[lut.diffuseID];
         output.albedo = textureHub[id].Sample(txSampler , uv);

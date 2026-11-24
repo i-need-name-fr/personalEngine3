@@ -1022,20 +1022,9 @@ namespace Sharc
         void update(Reservoir can , const float canW , const float motionW , const float randValue)
         {
             M += can.M;
-            // if(weightSum > 0.0f && randValue * weightSum < weight){
-            // position = can.position;
-            // const float nW = saturate(dot(can.nextDir , nextDir));
-            // radiance = lerp(radiance , can.radiance * nW , 1.0f / float(M));
-            // nextDir = can.nextDir;
-            // hD = can.hD;
-            // normal = can.normal;
-
             weightSum += canW;
-            if(weightSum > 0.0f && randValue * weightSum < canW)
-            {
-                radiance = lerp(radiance , can.radiance ,  max(motionW , 1.0f / float(M)));
-                hitDistance = can.hitDistance;
-            }
+            radiance = lerp(radiance , can.radiance , saturate(float(can.M) / float(max(M , 1u))));
+            hitDistance = can.hitDistance;
         }
 #endif
     };
@@ -1050,8 +1039,6 @@ namespace Sharc
 
 #ifndef __cplusplus
 
-// ---- stateful RNG ---------------------------------------------------------
-// PCG32. The state is advanced on every draw, so two draws from the same
 // variable are independent. Never derive two values from the same seed value.
 
 static const uint  AP_WIDTH  = 32; // screen X
