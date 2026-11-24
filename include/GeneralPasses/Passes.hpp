@@ -29,6 +29,7 @@
 #include "EVUpdatePass.hpp"
 #include "HDRAE.hpp"
 #include "HDR.hpp"
+#include "Volumentric.hpp"
 #include "PostProcess.hpp"
 #include "GUIPass.hpp"
 #include "NRCTrain.hpp"

@@ -77,8 +77,14 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
 
         const float length = (far - near) * rayScale;
 
-        const float4 slice = txFogImageArray.SampleLevel(txSampler , float3(uv , float(k)) , 0);
-        const float sigmaT = slice.a;
+        const float midDepth = 0.5f * (near + far);
+        const float layerCoord = log(midDepth / FOG_NEAR) / log(FOG_FAR / FOG_NEAR) * float(sliceCount) - 0.5f;
+        const float layerLow = clamp(floor(layerCoord) , 0.0f , float(sliceCount - 1u));
+        const float layerHigh = min(layerLow + 1.0f , float(sliceCount - 1u));
+        const float blend = saturate(layerCoord - layerLow);
+        float4 slice = lerp(txFogImageArray.SampleLevel(txSampler , float3(uv , layerLow) , 0) , txFogImageArray.SampleLevel(txSampler , float3(uv , layerHigh) , 0) , blend);
+        if(any(isnan(slice)) || any(isinf(slice))) slice = float4(0.0f , 0.0f , 0.0f , 0.0f);
+        const float sigmaT = fogDensityAt(generalBuffer.playerPosition + rayDirection * (midDepth * rayScale));
         const float3 scatter = slice.rgb;
 
         const float stepTransmittance = exp(-sigmaT * length);

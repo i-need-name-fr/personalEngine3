@@ -23,11 +23,11 @@ namespace Source
         using FogImage = Image::MultiViewImage2<layerCount , Image::ViewPerType::Layer>;
 
         Buffer::pDeviceReadableBuffer fogBuffer{nullptr};
-        std::shared_ptr<FogImage> fogImageArray{nullptr};
+        std::array<std::shared_ptr<FogImage> , 2> fogImage{};
 
         MOX_NO_DISCARD VkImageMemoryBarrier2 requestFogBarrier(const VkPipelineStageFlags2 stage , const VkAccessFlags2 access , const uint32_t count , const uint32_t layerIndex) noexcept
         {
-            return fogImageArray->translateImage(access , stage , count , layerIndex);
+            return fogImage[0]->translateImage(access , stage , count , layerIndex);
         }
 
         VkExtent2D extent{};
@@ -64,11 +64,14 @@ namespace Source
         // requestBarrier( name , stage , access ) of the base class does not know MultiViewImage2 : the volume is the whole image ( all the layers )
         MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implAskForBarrier(const std::string& name , VkPipelineStageFlags2 const stage , VkAccessFlags2 const access) noexcept override
         {
-            // the sources of the image are registered under the names of the two descriptors ( txFogImageArray - the sampled one , RWFogImageArray - the storage one ) , the .mox files ask for these
-            if(name == "fogImageArray" || name == "txFogImageArray" || name == "RWFogImageArray")
+            for(const char* base : {"RWFogImageArray" , "txFogImageArray" , "txFogHistory"})
             {
-                if(!fogImageArray) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create barrier for fogImageArray in VolSource , since the image is nullptr"});
-                return fogImageArray->translateWholeImage(access , stage);
+                for(uint32_t index = 0 ; index < 2 ; index++)
+                {
+                    if(name != moxPingPongName(base , index)) continue;
+                    if(!fogImage[index]) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create barrier for the fog image in VolSource , since the image is nullptr"});
+                    return fogImage[index]->translateWholeImage(access , stage);
+                }
             }
 
             return SourceCluster::_implAskForBarrier(name , stage , access);
@@ -77,7 +80,8 @@ namespace Source
         void processDelete() noexcept override
         {
             fogBuffer = nullptr;
-            fogImageArray = nullptr;
+            fogImage[0] = nullptr;
+            fogImage[1] = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -115,15 +119,17 @@ namespace Source
                     info.clear.float32[2] = 0.0f;
                     info.clear.float32[3] = 0.0f;
 
-                    fogImageArray = std::make_shared<FogImage>(info);
+                    fogImage[0] = std::make_shared<FogImage>(info);
+                    fogImage[1] = std::make_shared<FogImage>(info);
                 }
 
-                // the layout : 0 uniform buffer , 1 sampled image ( Texture2DArray ) , 2 storage image ( RWTexture2DArray )
+                // the layout : 0 uniform buffer , 1 sampled image ( Texture2DArray , the volume of this frame ) , 2 storage image ( RWTexture2DArray ) , 3 sampled image ( the volume of the last frame )
                 {
-                    std::vector<DescriptorLayoutData> data(3);
+                    std::vector<DescriptorLayoutData> data(4);
                     data[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+                    data[3] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -141,34 +147,36 @@ namespace Source
                     MOX_CHECK_RESULT(result)
                 }
 
+                for(uint32_t index = 0 ; index < 2 ; index++)
                 {
-                    const auto result = _implAddSource(fogImageArray.get() , "txFogImageArray");
-                    MOX_CHECK_RESULT(result)
+                    for(const char* base : {"txFogImageArray" , "RWFogImageArray" , "txFogHistory"})
+                    {
+                        const auto result = _implAddSource(fogImage[index].get() , moxPingPongName(base , index));
+                        MOX_CHECK_RESULT(result)
+                    }
                 }
 
-                {
-                    const auto result = _implAddSource(fogImageArray.get() , "RWFogImageArray");
-                    MOX_CHECK_RESULT(result)
-                }
-
-                // the descriptor buffer : nothing changes , so it is made once . the SAME view ( fullView : all the layers , a 2D array ) goes to the bindings 1 and 2 , only the descriptor type is different
+                // the descriptor buffers : the one with the number p ( = frameIndex % 2 ) is used by the frame with the parity p , the same rule as moxPingPongIndex :
+                // the "next" image ( PING_PONG_CURRENT: 1 ) is fogImage[p] , the "prev" one ( PING_PONG_CURRENT: 0 ) is fogImage[1 - p]
+                dbuffers.resize(2);
+                for(uint32_t parity = 0 ; parity < 2 ; parity++)
                 {
                     std::vector<DescriptorData2> data{};
-                    data.reserve(3);
+                    data.reserve(4);
                     data.push_back(DescriptorData2::createData(fogBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0));
-                    data.push_back(DescriptorData2::createData(fogImageArray->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0));
-                    data.push_back(DescriptorData2::createData(fogImageArray->fullView , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0));
+                    data.push_back(DescriptorData2::createData(fogImage[parity]->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0));
+                    data.push_back(DescriptorData2::createData(fogImage[parity]->fullView , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0));
+                    data.push_back(DescriptorData2::createData(fogImage[1u - parity]->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 3 , 0));
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
                     info.layout = dlayouts[0].get();
 
-                    dbuffers.resize(1);
-                    dbuffers[0] = std::make_shared<DescriptorBuffer2>(info);
+                    dbuffers[parity] = std::make_shared<DescriptorBuffer2>(info);
                 }
 
-                containsPingPong = false;
+                containsPingPong = true;
             }
             catch(std::exception& e)
             {

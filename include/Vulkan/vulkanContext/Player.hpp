@@ -139,8 +139,6 @@ namespace mox{
         }
 
         void assetinput(GLFWwindow* window, const float dt){
-            // без этого поворот мышью не применялся, пока не зажат WASD -
-            // calcFront() иначе вызывался только изнутри movePlayer_*
             calcFront();
             if(glfwGetKey(window , GLFW_KEY_W) == GLFW_PRESS) movePlayer_straight_or_not(true , dt);
             if(glfwGetKey(window , GLFW_KEY_S) == GLFW_PRESS) movePlayer_straight_or_not(false , dt);

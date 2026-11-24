@@ -195,7 +195,7 @@ namespace AI
                     info.context = context;
                     info.max = 0.001f;
                     info.min = 0.00001f;
-                    info.needsToWriteFile = false;
+                    info.needsToWriteFile = true;
 
                     inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 16 , "NRC_inputLayer">>(info);
                 }
@@ -205,7 +205,7 @@ namespace AI
                     info.context = context;
                     info.max = 0.001f;
                     info.min = 0.00001f;
-                    info.needsToWriteFile = false;
+                    info.needsToWriteFile = true;
 
                     outputLayer = std::make_shared<Buffer::NeuralBuffer<16 , 64 , "NRC_outputLayer">>(info);
                 }

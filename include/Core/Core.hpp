@@ -118,9 +118,11 @@ namespace mox
             step("the passes");
             guiPass = nullptr;
             rt = nullptr;
+            pt = nullptr;
             sharcPass = nullptr;
             mrt = nullptr;
             pProcess = nullptr;
+            volumentric = nullptr;
             evUpdate = nullptr;
             hdrae = nullptr;
             hdr = nullptr;
@@ -477,6 +479,14 @@ namespace mox
                 }
 
                 {
+                    Passes::PathTracing::CreateInfo info{};
+                    info.context = ctx;
+                    info.directory = "../Shaders/PathTracing/";
+                    info.moxName = "pathTracing";
+                    pt = std::make_shared<Passes::PathTracing>(info);
+                }
+
+                {
                     Passes::BF::CreateInfo info{};
                     info.context = ctx;
                     info.path_S = "../Shaders/BF_singular/bilateralFilteringSingular";
@@ -515,6 +525,15 @@ namespace mox
                     s.context = ctx;
                     s.path_S = "../Shaders/denoiser/ReLAX_spatial";
                     relaxs = std::make_shared<Passes::ReLAX<ShaderType::Spatial>>(s);
+                }
+
+                {
+                    Passes::Volumentric::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/Volumentric/Volumentric";
+                    info.extent = sources.vol->extent;
+                    info.layerCount = Source::VolSource::layerCount;
+                    volumentric = std::make_shared<Passes::Volumentric>(info);
                 }
 
                 {
@@ -592,7 +611,7 @@ namespace mox
                         deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , rt.get() , ao.get() , bf.get() ,
                         reblurt.get() , reblurs.get() , reblurt_indirect.get() , reblurs_indirect.get() ,
                         relaxt.get() , relaxs.get() ,
-                        pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
+                        volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
                     for(NodePass* pass : order)
@@ -614,7 +633,21 @@ namespace mox
                 //     }
                 // }
 
-                // the path tracing path : PathTracing.hpp is not written yet
+                // the path tracing path : the same passes as the ray tracing one , the ReSTIR PT pass instead of the RT one
+                {
+                    NodePass* order[] = {
+                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , pt.get() , ao.get() , bf.get() ,
+                        reblurt.get() , reblurs.get() , reblurt_indirect.get() , reblurs_indirect.get() ,
+                        relaxt.get() , relaxs.get() ,
+                        volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
+                    };
+
+                    for(NodePass* pass : order)
+                    {
+                        const auto result = graph.bindNodePass(pass , PathTracingPath);
+                        MOX_CHECK_RESULT(result)
+                    }
+                }
             }
             catch(std::exception &e)
             {
@@ -719,6 +752,7 @@ namespace mox
             fogSettings.g = 0.45f;
             fogSettings.heightFallOff = 0.12f;
             fogSettings.fogBaseHeight = -2.0f;
+            fogSettings.gridSize = static_cast<float>(Source::VolSource::layerCount);
             fogSettings.color = fogTint * fogGlow;
 
             {
@@ -966,15 +1000,10 @@ namespace mox
                     ImGui::Spacing();
 
 
-                    // how far beyond the radius of a lamp its shadow still counts ( in radii ) : 0 - it ends at the radius with a jump
                     gui::SliderFloat("light shadow fade" , &info.lightShadowFade , 0.0f , 2.0f);
                     gui::Separator();
-
-                    // RT : the shadow of the sun gets weaker with the distance to what covers the pixel ( meters , 0 - no fade )
                     gui::SliderFloat("sun shadow fade" , &info.sunShadowFade , 0.0f , 200.0f);
                     gui::Separator();
-
-                    // how dark a shadow of the direct light can get : 0 - black , 1 - no shadow
                 }
             }
             gui::Separator();
@@ -1006,15 +1035,24 @@ namespace mox
                 {
                     info.ReSTIRSSS = !info.ReSTIRSSS;
                 }
-                // the multiplier of the sigma of all the materials : to SEE the scattering on a scene of meters ( the sigma of a skin is 1 cm )
                 gui::SliderFloat("SSS scale" , &info.sssScale , 0.1f , 100.0f , "%.2f" , ImGuiSliderFlags_Logarithmic);
+            }
+
+            {
+                {
+                    if(gui::Button(info.NRC ? "NRC ON" : "NRC OFF"))
+                    {
+                        info.NRC = !info.NRC;
+                    }
+                }
+                gui::Separator();
+                gui::Spacing();
             }
 
             gui::Separator();
 
             if(info.RT)
             {
-                // the G buffer by ray tracing instead of the mesh shaders ( the test of the raster G buffer : culling , missing meshlets )
                 if(gui::Button(Passes::mRTPass::enabled ? "G buffer : mRT ( ray tracing )" : "G buffer : raster ( mesh shaders )")){
                     Passes::mRTPass::enabled = !Passes::mRTPass::enabled;
                 }
@@ -1048,15 +1086,6 @@ namespace mox
                         }
                     }
 
-                    gui::Separator();
-                    gui::BeginDisabled(!info.RT);
-                    {
-                        if(gui::Button(info.NRC ? "NRC ON" : "NRC OFF"))
-                        {
-                            info.NRC = !info.NRC;
-                        }
-                    }
-                    gui::EndDisabled();
                     gui::Separator();
 
                     gui::BeginDisabled(!info.RT);
@@ -1259,9 +1288,11 @@ namespace mox
         Passes::pEVUpdatePass evUpdate{};
 
         Passes::pPostProcess pProcess{};
+        Passes::pVolumentric volumentric{};
         Passes::pSHaRCPass sharcPass{};
         Passes::pmRTPass mrt{};
         Passes::pRayTracing rt{};
+        Passes::pPathTracing pt{};
 
         Passes::pNRCTrain nrct{};
         Passes::pNRCBack nrcb{};

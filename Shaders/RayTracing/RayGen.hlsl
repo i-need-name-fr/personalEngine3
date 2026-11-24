@@ -612,7 +612,7 @@ namespace ReSTIRGI{
             const float skyNdotV = max(dot(data.N , skyV) , 0.0001f);
             const float3 skyF = F_fresnel(skyF0 , skyNdotV);
             const float3 skyKD = (1.0f - skyF) * (1.0f - data.metallic);
-            result += sampleIBL(data.N) * skyKD * skyVisibility;
+            result += sampleIBL(data.N) * skyKD * skyVisibility * info.albedo;
         }
 
         if(!features.NRC)

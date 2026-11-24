@@ -11,26 +11,91 @@
 #include "../../include/moxObject/VertexHeap.hlsl"
 
 
-float sliceDepth(const float zf){
-    return FOG_NEAR * pow(FOG_FAR / FOG_NEAR , zf / fogBuffer.gridSize );
+// the number of the slices is the depth of the volume itself ( the same as PostProcess reads ) , fogBuffer.gridSize is not trusted
+float sliceDepth(const float zf , const float sliceCount){
+    return FOG_NEAR * pow(FOG_FAR / FOG_NEAR , zf / sliceCount);
 }
 
-// тип тут главное сделать так что Z будет Primary Образно говоря , поэтому здесь и деление такое странное 
-float3 froxelWorldPos(uint3 id , uint3 fogSize){
-    float2 uv = float2(float2(id.xy) + 0.5f) / float2(fogSize.xy);
+// тип тут главное сделать так что Z будет Primary Образно говоря , поэтому здесь и деление такое странное
+// jitter : the point of the froxel is moved inside the cell ( x , y , z in [0 , 1) ) , the centre of the cell is jitter = 0.5
+float3 froxelWorldPos(uint3 id , uint3 fogSize , float3 jitter){
+    float2 uv = (float2(id.xy) + jitter.xy) / float2(fogSize.xy);
     float2 ndc = uv * 2.0f - 1.0f;
     ndc.y = -ndc.y;
     float4 v = mul(generalBuffer.inverseProj , float4(ndc , 1.0f , 1.0f));
     float3 vDis = v.xyz / v.w;
     vDis /= abs(vDis.z);
-    float3 pos = vDis * sliceDepth(id.z + 0.5f );
+    float3 pos = vDis * sliceDepth(float(id.z) + jitter.z , float(fogSize.z));
     return mul(generalBuffer.inverseView , float4(pos , 1.0f)).xyz;
+}
+
+// PCG hash : 3 independent numbers in [0 , 1) for the froxel , they change every frame
+float3 froxelNoise(uint3 id , uint frame){
+    uint3 v = id * uint3(1664525u , 1013904223u , 2654435761u) + frame * 747796405u + 2891336453u;
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;  v.y += v.z * v.x;  v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;  v.y += v.z * v.x;  v.z += v.x * v.y;
+    return float3(v & 0x00FFFFFFu) / 16777216.0f;
 }
 
 // в каком дальше направлении будет идти фотон через весь fog 
 float phaseHG(const float cosTheta , const float g){
     float k = 1.0f + g * g - 2.0f * g * cosTheta;
     return (1.0f - g * g ) / (4.0f * PI * k * sqrt(k));
+}
+
+float calculateLightWindow(lg::LightSource light , float lightDistance)
+{
+    const float ratio = saturate(lightDistance / max(light.radius , 1e-4f));
+    float window = saturate(1.0f - ratio * ratio * ratio * ratio);
+    return window * window;
+}
+
+// the physical falloff times a window that reaches exactly 0 at lightRadius ( see lightAttenuation of RayGen )
+float lightAttenuation(lg::LightSource light , float lightDistance)
+{
+    const float falloff = 1.0f / (1.0f + light.Linear * lightDistance + light.Quadratic * lightDistance * lightDistance);
+    return falloff * calculateLightWindow(light , lightDistance);
+}
+
+// 1 : the way is free , 0 : something stands in it ( a transparent texel does not )
+float calculateShadows(float3 position , float3 direction , float maxDistance)
+{
+    RayDesc ray;
+    ray.Origin = position;
+    ray.Direction = direction;
+    ray.TMax = maxDistance;
+    ray.TMin = 0.001f;
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(TLAS , RAY_FLAG_NONE , 0x01 , ray);
+    while(query.Proceed())
+    {
+        if(query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            if(checkTransHit(query.CandidateTriangleBarycentrics() , query.CandidatePrimitiveIndex() , query.CandidateInstanceID()))
+            {
+                query.CommitNonOpaqueTriangleHit();
+            }
+        }
+    }
+
+    return (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0f : 1.0f;
+}
+
+float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed)
+{
+    const float phi = 2.0f * PI * rand(seed);
+    const float rand2 = rand(seed);
+
+    const float cosTheta = lerp(cosAlpha , 1.0f , rand2);
+    const float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
+    const float3 localDir = {sinTheta * cos(phi) , sinTheta * sin(phi) , cosTheta};
+
+    float3 tangent , bitangent;
+    buildONB(axis , tangent , bitangent);
+    return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
 
@@ -44,8 +109,11 @@ void main(uint3 id : SV_DispatchThreadID)
     uint3 fogSize = uint3(width , height , tempDepth);
     if(any(id >= fogSize)) return;
 
-    float3 pos = froxelWorldPos(id , fogSize);
-    float density = fogBuffer.density * exp(-fogBuffer.heightFallOff * max(pos.y - fogBuffer.fogBaseHeight , 0));   
+    uint seed = initSeed(id.xy , generalBuffer.frameIndex);
+
+    const float3 jitter = froxelNoise(id , generalBuffer.frameIndex);
+    float3 pos = froxelWorldPos(id , fogSize , jitter);
+    float density = fogDensityAt(pos);
     float sigmaT = density;
     float3 sigmaS = sigmaT * fogBuffer.albedo;
 
@@ -81,6 +149,62 @@ void main(uint3 id : SV_DispatchThreadID)
         }
     }
     float3 Lin = sunBuffer.diffuse  * phaseHG(dot(L_sun , V) , g) * vis;
-    const float3 scattered = Lin + fogBuffer.color;
-    RWFogImageArray[id] = float4(scattered * sigmaS , sigmaT);
+
+    uint lightCount;
+    uint lightIndices[lg::MAX_LIGHT_PER_CELL];
+
+    findLightIndices(pos , lightIndices , lightCount);
+    
+    if(lightCount > 0)
+    {
+        [loop]
+        for(uint i = 0 ; i < lightCount ; i++)
+        {
+            const lg::LightSource light = lightBuffer[lightIndices[i]];
+            float3 L = light.position - pos;
+            const float d = length(L);
+            L = normalize(L);
+
+            const float shadow = calculateShadows(pos , L , d - 0.001f);
+            const float att = lightAttenuation(light , d);
+            const float3 diff = light.diffuse * shadow * att;
+            Lin += diff *  phaseHG(dot(L , V) , g);
+        }
+    }
+
+    const float SKY_VISIBLE_RANGE = 100.0f;
+    const float SKY_VISIBLE_MIN = 0.1f;
+    const float3 skyDirection = sampleCone(float3(0.0f , 1.0f , 0.0f) , 0.0f , seed);
+    const float skyVisible = lerp(SKY_VISIBLE_MIN , 1.0f , calculateShadows(pos , skyDirection , SKY_VISIBLE_RANGE));
+
+    const float3 scattered = Lin + fogBuffer.color * skyVisible;
+    float3 froxel = scattered * sigmaS;
+    if(any(isnan(froxel)) || any(isinf(froxel))) froxel = float3(0.0f , 0.0f , 0.0f);
+
+    static const float MAX_HISTORY_COUNT = 64.0f;
+    float count = 1.0f;
+    float4 history = float4(0.0f , 0.0f , 0.0f , 0.0f);
+    {
+        const float4 prevClip = mul(generalBuffer.prevViewProj , float4(pos , 1.0f));
+        if(prevClip.w > FOG_NEAR && prevClip.w < FOG_FAR)
+        {
+            const float2 prevNdc = prevClip.xy / prevClip.w;
+            const float2 prevUV = float2(prevNdc.x * 0.5f + 0.5f , 0.5f - prevNdc.y * 0.5f);
+            const float layerCoord = log(prevClip.w / FOG_NEAR) / log(FOG_FAR / FOG_NEAR) * float(fogSize.z) - 0.5f;
+
+            if(all(prevUV > 0.0f) && all(prevUV < 1.0f))
+            {
+                const float layerLow = clamp(floor(layerCoord) , 0.0f , float(fogSize.z - 1u));
+                const float layerHigh = min(layerLow + 1.0f , float(fogSize.z - 1u));
+                const float layerBlend = saturate(layerCoord - layerLow);
+                history = lerp(txFogHistory.SampleLevel(txSampler , float3(prevUV , layerLow) , 0) , txFogHistory.SampleLevel(txSampler , float3(prevUV , layerHigh) , 0) , layerBlend);
+                if(any(isnan(history)) || any(isinf(history))) history = float4(0.0f , 0.0f , 0.0f , 0.0f);
+
+                if(history.a >= 0.5f) count = min(history.a + 1.0f , MAX_HISTORY_COUNT);
+            }
+        }
+    }
+
+    const float blend = 1.0f / count;
+    RWFogImageArray[id] = float4(lerp(history.rgb , froxel , blend) , count);
 }
