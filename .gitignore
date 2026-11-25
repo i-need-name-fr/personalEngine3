@@ -6,3 +6,4 @@ ShaderModuleCache/
 PipelineCache/
 include/AI/NeuralBuffer/Cache/
 models/
+Shaders/w/
