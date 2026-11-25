@@ -13,6 +13,7 @@ static const float MAX_ACCUM_FRAMES = 64.0f;
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_SCENE_IMAGES_INCLUDED 1
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 
 [[vk::push_constant]] struct {
     uint indirect;
@@ -67,13 +68,34 @@ bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
 void main(uint3 id : SV_DispatchThreadID){
 
     uint width , height;
-    diffuseImage.GetDimensions(width, height);
+
+    const bool indirect = push.indirect;
+    if(!indirect)
+    {
+        diffuseImage.GetDimensions(width, height);
+    }
+    else
+    {
+        indirectImage.GetDimensions(width, height);
+    }
 
     uint2 screenSize = uint2(width , height);
     if(any(id.xy >= screenSize)) return;
 
-    if(pixelCheck[id.xy] == SKYBOX_PIXEL){
-        // the spatial pass copies this count into the history
+    uint2 gImageCoord;
+    uint2 gSize;
+    if(indirect)
+    {
+        gImageCoord = indirectToDirectPixel(id.xy , indirectJitter(id.xy , generalBuffer.frameIndex));
+        gSize = directSize();
+    }
+    else
+    {
+        gImageCoord = id.xy;
+        gSize = uint2(width , height);
+    }
+
+    if(pixelCheck[gImageCoord] == SKYBOX_PIXEL){
         tmpDiffuseImage[id.xy] = float4(0.0f , 0.0f , 0.0f , 0.0f);
         return;
     }
@@ -83,13 +105,17 @@ void main(uint3 id : SV_DispatchThreadID){
     }
 
     float2 uv = (float2(id.xy) + 0.5f ) / float2(screenSize);
-    float2 prevUV = uv + motionVector[id.xy];
+    float2 prevUV = uv + motionVector[gImageCoord];
     const uint2 prevCoord = uint2(round(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f)));
+
+    float2 gUV = (float2(gImageCoord) + 0.5f ) / float2(gSize);
+    float2 gPrevUV = gUV + motionVector[gImageCoord];
+    const uint2 gPrevCoord = uint2(round(clamp(gPrevUV * float2(gSize) - 0.5f , float2(0.0f , 0.0f) , float2(gSize) - 1.0f)));
 
     float3 currentSignal = readCurrent(id.xy);
     float pCount = readHistoryCount(prevCoord);
     float3 history = readHistory(prevCoord);
-    bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f))) && checkDisocclusion(id.xy , prevCoord);
+    bool valid = !(any(gPrevUV > float2(1.0f , 1.0f)) || any(gPrevUV < float2(0.0f , 0.0f))) && checkDisocclusion(gImageCoord , gPrevCoord);
 
     if(!valid){
         pCount = 0.0f;

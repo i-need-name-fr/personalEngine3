@@ -145,9 +145,12 @@ namespace mox
             nkpdt = nullptr;
             nkpdb = nullptr;
             nkpdbi = nullptr;
+            nkpdi = nullptr;
             nkpdp1 = nullptr;
             nkpdp2 = nullptr;
             nkpdp3 = nullptr;
+            rtI = nullptr;
+            ptI = nullptr;
 
             step("the graph");
             graph = RenderGraph{};
@@ -634,6 +637,14 @@ namespace mox
                 }
 
                 {
+                    // NKPD of the indirect light : its own pass with the resolution of indirectImage ( the diffuse signal is denoised in PostProcess )
+                    Passes::NKPDInference::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/inferenceIndirect";
+                    nkpdi = std::make_shared<Passes::NKPDInference>(info);
+                }
+
+                {
                     Passes::NKPDApply1::CreateInfo info{};
                     info.context = ctx;
                     info.path_S = "../Shaders/NKPD/applyInput";
@@ -660,15 +671,30 @@ namespace mox
                     info.path_S = "../Shaders/GUI/GUIPass";
                     guiPass = std::make_shared<Passes::GUIPass>(info);
                 }
+
+                {
+                    Passes::PathTracingIndirect::CreateInfo info{};
+                    info.context = ctx;
+                    info.directory = "../Shaders/PathTracingIndirect/";
+                    info.moxName = "pathTracingIndirect";
+                    ptI = std::make_shared<Passes::PathTracingIndirect>(info);
+                }
+
+                {
+                    Passes::RayTracingIndirect::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/RayTracingIndirect/RayTracingIndirect";
+                    rtI = std::make_shared<Passes::RayTracingIndirect>(info);
+                }
                 
                 {
                     NodePass* order[] = {
-                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , rt.get() , ao.get() , bf.get() ,
+                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , rtI.get() ,rt.get() , ao.get() , bf.get() ,
                         // the indirect one after the indirect spatial pass . the counters first , the Adam of the 3 layers ( and the translate of the weights ) after both backward passes
                         reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
-                        relaxt.get() , relaxs.get() ,
+                        relaxt.get() , relaxs.get() , nkpdi.get() ,
                         volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
@@ -693,11 +719,11 @@ namespace mox
 
                 {
                     NodePass* order[] = {
-                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , pt.get() , ao.get() , bf.get() ,
+                        deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , ptI.get() ,  pt.get() , ao.get() , bf.get() ,
                         reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
-                        relaxt.get() , relaxs.get() ,
+                        relaxt.get() , relaxs.get() , nkpdi.get() ,
                         volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
@@ -1398,8 +1424,11 @@ namespace mox
         Passes::pVolumentric volumentric{};
         Passes::pSHaRCPass sharcPass{};
         Passes::pmRTPass mrt{};
+
         Passes::pRayTracing rt{};
+        Passes::pPathTracingIndirect ptI{};
         Passes::pPathTracing pt{};
+        Passes::pRayTracingIndirect rtI{};
 
         Passes::pNRCTrain nrct{};
         Passes::pNRCBack nrcb{};
@@ -1410,6 +1439,7 @@ namespace mox
         Passes::pNKPDTrain nkpdt{};
         Passes::pNKPDBack<0> nkpdb{};
         Passes::pNKPDBack<1> nkpdbi{};
+        Passes::pNKPDInference nkpdi{};
         Passes::pNKPDApply1 nkpdp1{};
         Passes::pNKPDApply2 nkpdp2{};
         Passes::pNKPDApply3 nkpdp3{};

@@ -2,6 +2,7 @@
 
 #include "../shaderStructures/shaderStructure.h"
 #include "SourceCluster.hpp"
+#include "IndirectExtent.hpp"
 
 namespace mox
 {
@@ -37,8 +38,8 @@ namespace Source
         std::array<ReservoirBuffer , 2> ReSTIRPTBuffer{};
         std::array<ReservoirBuffer , 2> ReSTIRSSBuffer{};
 
-        // the reservoirs have the FULL extent of the screen ( one reservoir per pixel ) : RayGen indexes them with bufferIndex ( the width of the screen ) . they were the half
-        // of it when indirectImage was half . the cost at 1920 x 1080 : GI 64 B + PT 80 B + SS 80 B per pixel , x2 for the ping pong , about 930 MB
+        // GI and PT : one reservoir per pixel of indirectImage ( the extent of the screen / MOX_INDIRECT_DIVISOR_RESOLUTION ) : the shaders index them with bufferIndex ( pixel , width , height ) , the size from
+        // indirectImage.GetDimensions . the cost at the full 1920 x 1080 : GI 64 B + PT 80 B + SS 80 B per pixel , x2 for the ping pong , about 930 MB ( divided by the divisor squared )
         VkExtent2D extent{};
 
         inline static const std::string Name = "SceneReSTIR";
@@ -78,14 +79,14 @@ namespace Source
             SourceCluster::processDelete();
         }
 
-        // one buffer for every pixel of the half extent
+        // one buffer for every pixel of the given extent
         template<typename T>
-        ReservoirBuffer _implCreateReservoirs() const
+        ReservoirBuffer _implCreateReservoirs(const VkExtent2D size) const
         {
             Buffer::GeneralBuffer2<Buffer::BufferType::Device , false>::CreateInfo info{};
             info.context = context;
             info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-            info.size = static_cast<VkDeviceSize>(sizeof(T)) * extent.width * extent.height;
+            info.size = static_cast<VkDeviceSize>(sizeof(T)) * size.width * size.height;
 
             return std::make_shared<Buffer::GeneralBuffer2<Buffer::BufferType::Device , false>>(info);
         }
@@ -94,14 +95,16 @@ namespace Source
         {
             try
             {
-                // the same extent as the images of SceneImages ( at least 1 pixel )
-                extent = {std::max(1u , context->sc->extent.width) , std::max(1u , context->sc->extent.height)};
+                // GI and PT : the same extent as indirectImage of SceneImages ( at least 1 pixel ) . SS ( the subsurface scattering ) is a part of the DIRECT light : its reservoirs are indexed by the pixel of the
+                // full resolution ( bufferIndex ( pixel ) of RayGen ) , so they keep the extent of the screen
+                extent = indirectExtent(context->sc->extent);
+                const VkExtent2D fullExtent = {std::max(1u , context->sc->extent.width) , std::max(1u , context->sc->extent.height)};
 
                 for(const auto& id : {0 , 1})
                 {
-                    ReSTIRGIBuffer[id] = _implCreateReservoirs<ReservoirGI>();
-                    ReSTIRPTBuffer[id] = _implCreateReservoirs<ReservoirPT>();
-                    ReSTIRSSBuffer[id] = _implCreateReservoirs<ReservoirSS>();
+                    ReSTIRGIBuffer[id] = _implCreateReservoirs<ReservoirGI>(extent);
+                    ReSTIRPTBuffer[id] = _implCreateReservoirs<ReservoirPT>(extent);
+                    ReSTIRSSBuffer[id] = _implCreateReservoirs<ReservoirSS>(fullExtent);
                 }
 
                 {

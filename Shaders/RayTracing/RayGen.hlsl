@@ -18,6 +18,7 @@
 #define MOX_NRC_INCLUDED 8
 #include "../../include/AI/CoopVec.hlsl"
 #include "../../include/AI/NRC/NRC.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 
 #define RT_SHADOW_MISS 0
 #define RT_SHADOW_HIT 0
@@ -497,8 +498,10 @@ namespace ReSTIRGI{
         prevUV.y = 1.0f - prevUV.y;
         if(any(prevUV < 0.0f) || any(prevUV >= 1.0f)) return 0.0f;
 
-        const uint2 screenSize = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
-        const uint2 prevPixel = min(uint2(prevUV * float2(screenSize)) , screenSize - 1u);
+        // the reservoirs have the resolution of indirectImage , the G buffer the full one : the pixel of the G buffer is the one that the reservoir was made for ( the jitter of the last frame )
+        const uint2 prevIndirect = uvToIndirectPixel(prevUV);
+        const uint2 prevPixel = prevDirectPixelOf(prevIndirect);
+        const uint2 iSize = indirectSize();
 
         // the same surface : the normal is about the same and the point is on the plane of the surface of that pixel ( the tolerance grows with the distance : a pixel is wider there )
         const float4 prevPosition = prevPositionImage[prevPixel];
@@ -508,7 +511,7 @@ namespace ReSTIRGI{
         const float tolerance = max(0.05f , 0.01f * length(data.P - generalBuffer.playerPosition));
         if(abs(dot(data.P - prevPosition.xyz , prevNormal)) > tolerance) return 0.0f;
 
-        const ReservoirGI prev = prevReSTIRGIBuffer[bufferIndex(prevPixel)];
+        const ReservoirGI prev = prevReSTIRGIBuffer[bufferIndex(prevIndirect , iSize.x , iSize.y)];
         if(prev.M == 0u) return 0.0f;
 
         const float3 L = normalize(prev.samplePos - data.P);
@@ -683,120 +686,6 @@ namespace ReSTIRGI{
         res.roughness = load.roughness;
         res.M = 1;
 
-        return res;
-    }
-
-    bool historyMatchesPosition(const float3 P , const uint2 prevPixel){
-        const float4 prevPosition = prevPositionImage[prevPixel];
-        if(prevPosition.w == 0.0f) return false;
-        return length(P - prevPosition.xyz) <= 0.05f;
-    }
-
-    GeneralObjectInfo readPrevBuffer(GeneralObjectInfo current , uint2 prevPixel)
-    {
-        GeneralObjectInfo a = current;
-
-        a.P = prevPositionImage[prevPixel].xyz;
-        a.N = prevNormalImage[prevPixel].xyz;
-
-        return a;
-    }
-
-    float targetFunction(ReservoirGI a , GeneralObjectInfo info)
-    {
-        float3 fcos = 0.0f;
-        const float3 L = normalize(a.samplePos - info.P);
-        if(isSpecularMode(info.roughness , info.metallic))
-        {
-            const float3 F0 = lerp(0.04 , info.albedo , info.metallic);
-            fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
-        }
-        else
-        {
-            fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
-        }
-        return luminance(fcos * a.radiance);
-    }
-
-    ReservoirGI temporalReuse_GI( inout uint seed ,ReservoirGI current , uint2 prevCoord , GeneralObjectInfo info){
-        ReservoirGI r = (ReservoirGI)0;
-
-        ReservoirGI prevGI = prevReSTIRGIBuffer[bufferIndex(prevCoord)];
-
-        const uint M_CAP = 30u;
-        prevGI.M = min(prevGI.M , M_CAP * max(current.M , 1u));
-        const GeneralObjectInfo prev = readPrevBuffer(info , prevCoord);
-        // now to this ReSTIR GI we are going to add MIS , it will be counted as new kinda
-        // however it will be posted as a personalEngine3 new ReSTIR GI 
-        float3 Q = prevGI.samplePos;
-        float3 Q_normal = prevGI.sampleNormal;
-
-        float3 dirFromQ = Q - prev.P;
-        float distN = length(dirFromQ);
-        float cosN = abs(dot(normalize(-dirFromQ), Q_normal));
-        float3 dirFromMine = Q - info.P;
-        float distMine = length(dirFromMine);
-        float cosMine = abs(dot(normalize(-dirFromMine),  Q_normal));
-        float jacobian = (cosMine * distN * distN) / max(cosN * distMine * distMine , 1e-20);
-
-        jacobian = clamp(jacobian , 0.0f , 10.0f);
-
-        prevGI.W *= jacobian;
-
-        const float p_hat_A_x_a = targetFunction(current , info);
-        const float p_hat_B_x_a = targetFunction(current , prev);
-        const float p_hat_A_x_b = targetFunction(prevGI , info);
-        const float p_hat_B_x_b = targetFunction(prevGI , prev);
-
-        const float m_a = float(current.M) * p_hat_A_x_a / max(float(current.M) * p_hat_A_x_a + float(prevGI.M) * p_hat_B_x_a , 1e-20f);
-        const float m_b = float(prevGI.M) * p_hat_B_x_b / max(float(prevGI.M) * p_hat_B_x_b + float(current.M) * p_hat_A_x_b , 1e-20f);
-
-        const float w_c = m_a * p_hat_A_x_a * current.W;
-        const float w_p = m_b * p_hat_A_x_b * prevGI.W;
-
-        r.update(current , w_c , current.M , rand(seed));
-        r.update(prevGI , w_p , prevGI.M , rand(seed));
-
-        const float p_hat = targetFunction(r , info);
-        r.W = (p_hat > 0.0f && current.M > 0u) ? r.weightSum / p_hat : 0.0f;
-        if(!isfinite(r.W)) r.W = 0.0f;
-        return r;
-    }
-
-    uint pickRandomNumber(inout uint seed , uint totalCount){
-        return uint(float(totalCount) * rand(seed));
-    }
-
-
-    ReservoirGI ReSTIR_GI_generation(inout uint seed , GeneralObjectInfo info){
-        ReservoirGI res = (ReservoirGI)0;
-        if(!features.ReSTIRGI){
-            res.W = 1.0f;
-            res.radiance = 1.0f;
-            return res;
-        }
-
-        uint2 pixel = DispatchRaysIndex().xy;
-
-        res = generateReservoirGI(info , pixel  , seed);
-
-        if(features.ReSTIRGI_temporal){
-            uint2 size = DispatchRaysDimensions().xy;
-            float4 clipPos = mul(generalBuffer.prevViewProj , float4(info.P , 1.0f));
-            float3 pos = clipPos.xyz / clipPos.w;
-            float2 uv = pos.xy * 0.5f + 0.5f;
-            uv.y = 1.0f - uv.y;
-            // the check is made BEFORE the conversion to uint : a negative float does not become a pixel outside of the screen , and an unsigned
-            // value is never < 0 ( the old check was always true )
-            const bool validUV = (uv.x >= 0.0f && uv.x < 1.0f && uv.y >= 0.0f && uv.y < 1.0f);
-            if(validUV){
-                const uint2 prevPixel = min(uint2(uv * float2(size)) , size - 1u);
-                // only the history of the same surface is reused ( the position of the last frame is close to this one )
-                if(historyMatchesPosition(info.P , prevPixel)){
-                    res = temporalReuse_GI(seed , res , prevPixel ,info);
-                }
-            }
-        }
         return res;
     }
 }
@@ -1079,8 +968,6 @@ void main()
     float2 uv = (float2(pixel) + 0.5f) / float2(size);
     
     RayPayLoad load = (RayPayLoad)0;
-    ReservoirGI gi = (ReservoirGI)0;
-    ReservoirPT pt = (ReservoirPT)0;
     ReservoirSS ss = (ReservoirSS)0;
 
     ss.valid = 0;
@@ -1121,7 +1008,8 @@ void main()
         float3 finalSpecular = 0.0f;
         float3 finalIndirect = 0.0f;
         float finalShadow = 0.0f;
-        float dHit = 0.0f;
+        // the hit distance of the diffuse light is the one of the indirect light ( the same rays ) : the pass of the indirect light has already written it for the block of this pixel
+        const float indirectHit = indirectDistance[directToIndirectPixel(pixel)];
         float tspecularDistance = 0.0f;
 
         float4 clipPos = mul(generalBuffer.prevViewProj , float4(info.P , 1.0f));
@@ -1137,7 +1025,6 @@ void main()
         float3 totalDiffuse = 0.0f;
         float3 totalSpecular = 0.0f;   
         float totalShadow = 0.0f;
-        float3 totalIndirect = 0.0f;
         float sunShadow = 1.0f;
         float lightShadow = 1.0f;
         float sunLuminance = 0.0f;
@@ -1176,32 +1063,7 @@ void main()
             }
         }
 
-        // GI here
-
-        if(features.ReSTIRGI)
-        {
-            gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
-            if(gi.M >0)
-            {
-                const float3 L = normalize(gi.samplePos - info.P);
-                dHit = length(gi.samplePos - info.P);
-                totalIndirect = gi.radiance * gi.W * evalDiffuse(info.albedo , info.N , L , info.metallic);
-            }
-        }
-        else if(features.SHaRC)
-        {   
-            const float d = length(generalBuffer.playerPosition - info.P);
-            const uint index = Sharc::getIndex(info.P , info.N ,d );
-            const Sharc::Reservoir sharc = Sharc::tableBuffer[index];
-            dHit = (sharc.valid != 0u) ? max(length(sharc.hitPoint - info.P) , 1.0f) : 10000.0f; 
-            const float3 rad = Sharc::getGradRadiance(info.P , info.N , d);
-            totalIndirect = rad * info.albedo * (1.0f - info.metallic);
-        }
-        else if(features.NRCFull)
-        {
-            totalIndirect = AI::NRC::askNRC(info.P , info.N) * info.albedo * (1.0f - info.metallic);
-            dHit = 10.0f;
-        }
+        // the indirect light is not here : it has its own pass ( RayTracingIndirect ) with its own resolution
 
         float indirectLum = 0.0f;
         if(!isfinite(indirectLum)) indirectLum = 0.0f;
@@ -1611,15 +1473,13 @@ void main()
             ss.valid = 0;
         }
 
-        // the direct light ( sun , lights , SSS ) has no hit distance of its own : the soft shadows need some blur anyway , so a fixed 2 m ; the indirect one has the distance of its source
-        load.lightInfo.diffuseHitDistance = min(dHit , 10000.0f);
-        load.lightInfo.indirectHitDistance = min(max(dHit , 2.0f) , 10000.0f);
+        // the direct light ( sun , lights , SSS ) has no hit distance of its own : it takes the one of the indirect light ( the soft shadows need some blur anyway )
+        load.lightInfo.diffuseHitDistance = indirectHit;
         if(!load.fromReflection) load.lightInfo.specularHitDistance = min(tspecularDistance , 10000.0f);
         if(!load.fromReflection) load.lightInfo.specularHitDistance = min(tspecularDistance , 10000.0f);
         load.pixelInfo.viewDir = info.V;
         load.lightInfo.shadow = totalShadow;
         load.lightInfo.diffuse = (diffuseOut);
-        load.lightInfo.indirect = totalIndirect / albedoSafe;
         load.lightInfo.specular = (totalSpecular * objectAmbient + reflectedSpecular);
         load.pixelInfo.motionVector = motion;
         load.pixelInfo.pixelType = COLOR_PIXEL;
@@ -1629,15 +1489,11 @@ void main()
     diffuseDistance[pixel]   = load.lightInfo.diffuseHitDistance;
     specularImage[pixel]     = float4(load.lightInfo.specular , 1.0f);
     specularDistance[pixel]  = load.lightInfo.specularHitDistance;
-    indirectImage[pixel]     = float4(load.lightInfo.indirect , 1.0f);
-    indirectDistance[pixel]  = load.lightInfo.indirectHitDistance;
     shadowImage[pixel]       = load.lightInfo.shadow;
     viewImage[pixel]         = float4(load.pixelInfo.viewDir , 1.0f);
     motionVector[pixel]      = load.pixelInfo.motionVector;
     pixelCheck[pixel]        = load.pixelInfo.pixelType;
 
     const uint reservoirID = bufferIndex(pixel);
-    ReSTIRGIBuffer[reservoirID] = gi;
-    ReSTIRPTBuffer[reservoirID] = pt;
     ReSTIRSSBuffer[reservoirID] = ss;
 }

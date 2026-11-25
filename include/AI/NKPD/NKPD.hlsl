@@ -63,7 +63,7 @@ static const int NP_LAYOUT_COLUMN_MAJOR = 1;
 static const int NP_LAYOUT_INFERENCING_OPTIMAL = 2;
 static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
-#if defined(MOX_COOP_VECTOR) && defined(MOX_SCENE_IMAGES_INCLUDED)
+#if defined(MOX_COOP_VECTOR) && defined(MOX_SCENE_IMAGES_INCLUDED) && defined(MOX_INDIRECT_PIXELS_INCLUDED)
 
     // the matrix operations of the cooperative vector take a POINTER ( ptrData holds the addresses of the weight and gradient buffers ) , the same idea as NrcPtr
     struct NKPDBlob { uint data[1 << 20]; };
@@ -122,21 +122,28 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         return hitDistance / max(scale, 1e-4);
     }
 
+    uint2 gridSize(const bool useIndirect)
+    {
+        return useIndirect ? indirectSize() : directSize();
+    }
+
+    uint2 gPixel(const uint2 p , const bool useIndirect)
+    {
+        if(useIndirect) return indirectToDirectPixel(p , indirectJitter(p , generalBuffer.frameIndex));
+        return p;
+    }
+
     float3 readInput(const uint2 p , const bool useIndirect)
     {
 #if defined(NKPD_TRAINING)
         // the training shader : diffuseImage / indirectImage are the ground truth ( the result of ReBLUR ) , the net gets the signal before its spatial pass
         // tmpDiffuseImage keeps only the LAST temporal pass of ReBLUR , that is the indirect one
         return tmpDiffuseImage[p].xyz;
-#endif   
-        if(useIndirect)
-        {
-            return indirectImage[p].xyz;
-        }
-        else
-        {
-            return diffuseImage[p].xyz;
-        }
+#else
+        // the inference : ReBLUR is off , the raw signal of RayGen / of the indirect pass
+        if(useIndirect) return indirectImage[p].xyz;
+        return diffuseImage[p].xyz;
+#endif
     }
 
     float3 readPrevInput(const uint2 p , const bool useIndirect)
@@ -157,12 +164,9 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         return diffuseHistoryImage[p].r;
     }
 
-    // the point of the last frame has to lie on the PLANE of the current surface : the distance to the plane is relative to the distance to the camera ( the error of the reprojection grows with it ) ,
-    // 5 cm is the smallest allowed error ( the same as before for the near surfaces ) . the error ALONG the surface is not a reason to throw the history away
     static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
     static const float DISOCCLUSION_RELATIVE = 0.02f;
 
-    // does the pixel of the last frame show the same surface : the same check as the temporal pass of ReBLUR
     bool checkDisocclusion(const uint2 currentPixel , const uint2 prevPixel)
     {
         const float3 centerPosition = positionImage[currentPixel].xyz;
@@ -212,15 +216,20 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         uint2 pid = info.prevCoord;
         const float3 center = readInput(id , info.useIndirect);
         const float history = readHistoryCount(id , info.useIndirect);
-        const float3 cN = normalImage[id].xyz;
-        const float cD = depthImage[id];
+        // id is a pixel of the grid of the signal , gId is its pixel of the G buffer
+        const uint2 gId = gPixel(id , info.useIndirect);
+        const float3 cN = normalImage[gId].xyz;
+        const float cD = depthImage[gId];
         float distance = readHitDistance(id , info.useIndirect);
-        uint width , height;
-        depthImage.GetDimensions(width , height);
+        const uint2 gridSz = gridSize(info.useIndirect);
+        const uint width = gridSz.x;
+        const uint height = gridSz.y;
+        // the radius is in the pixels of the full resolution , the offsets are in the pixels of the grid of the signal ( the indirect pixel is wider )
+        const float resolutionScale = float(gridSz.x) / float(directSize().x);
         distance = min(distance , MAX_HIT_DISTANCE);
-        float radius = min(ComputeBlurRadius(NormalizeHitDistance(distance , cD , 0) , history ) , MAX_RADIUS_PIXELS);
+        float radius = min(ComputeBlurRadius(NormalizeHitDistance(distance , cD , 0) , history ) , MAX_RADIUS_PIXELS) * resolutionScale;
 
-        const float motionW = length(motionVector[id] * float2(width , height));
+        const float motionW = length(motionVector[gId] * float2(width , height));
 
         const float centerAlpha = info.validUV ? 1.0f / min(history + 1.0f , MAX_ACCUM_FRAMES) : 1.0f;
         const float3 centerPrev = readPrevInput(pid , info.useIndirect);
@@ -267,7 +276,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
                 continue;
             }
 
-            if(pixelCheck[samplePos] != COLOR_PIXEL)        
+            // the G buffer of the neighbour : the pixel of the G buffer that THAT pixel of the grid looks at
+            const uint2 gS = gPixel(uint2(samplePos) , info.useIndirect);
+
+            if(pixelCheck[gS] != COLOR_PIXEL)        
             {
                 weights[i] = 0.0f;
                 radiances[i] = 0.0f;
@@ -290,7 +302,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
                 continue;
             }
-            const float3 P = positionImage[samplePos].xyz;
+            const float3 P = positionImage[gS].xyz;
             float4 clipPos = mul(generalBuffer.prevViewProj , float4(P , 1.0f));
             float3 pos = clipPos.xyz / clipPos.w;
             float2 prevUV = pos.xy * 0.5f + 0.5f;
@@ -302,7 +314,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float3 prevInput = readPrevInput(prevPixel , info.useIndirect);
             const float pHistory = readHistoryCount(prevPixel , info.useIndirect);
 
-            const bool nValid = validUV && checkDisocclusion(samplePos , prevPixel);
+            // the surface check is made in the G buffer ( the full resolution ) : the point of the neighbour and the pixel of the last frame that it came from
+            const bool nValid = validUV && checkDisocclusion(gS , uvToDirectPixel(saturate(prevUV)));
 
             float alpha = 1.0f;
             if(nValid)
@@ -316,8 +329,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
             nInput = lerp(prevInput , nInput , alpha);
 
-            float sDepth = depthImage[samplePos];
-            float3 sNormal = normalImage[samplePos].xyz;
+            float sDepth = depthImage[gS];
+            float3 sNormal = normalImage[gS].xyz;
 
             float3 colorDiff = ColorDiff(nInput , centerAccumulated);
 
@@ -431,17 +444,24 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     // the info of a pixel : the pixel of the last frame ( by the motion vector ) and is it usable
     NKPDOptimal buildNKPDInfo(const uint2 pixel , const bool useIndirect)
     {
-        uint width , height;
-        depthImage.GetDimensions(width , height);
-        const float2 size = float2(width , height);
-        const float2 uv = (float2(pixel) + 0.5f) / size;
-        const float2 prevUV = uv + motionVector[pixel];
+        // pixel is a pixel of the grid of the signal ( see gridSize ) , g is the pixel of the G buffer that it looks at
+        const uint2 gridSz = gridSize(useIndirect);
+        const uint2 dSize = directSize();
+        const uint2 g = gPixel(pixel , useIndirect);
+
+        const float2 uv = (float2(pixel) + 0.5f) / float2(gridSz);
+        const float2 prevUV = uv + motionVector[g];
+
+        // the surface check : in the G buffer , from the point that the pixel looks at ( the same as the temporal pass of ReBLUR )
+        const float2 gUV = (float2(g) + 0.5f) / float2(dSize);
+        const float2 gPrevUV = gUV + motionVector[g];
+        const uint2 gPrev = uint2(round(clamp(gPrevUV * float2(dSize) - 0.5f , float2(0.0f , 0.0f) , float2(dSize) - 1.0f)));
 
         NKPDOptimal info;
         info.currentCoord = pixel;
-        info.prevCoord = uint2(round(clamp(prevUV * size - 0.5f , float2(0.0f , 0.0f) , size - 1.0f)));
+        info.prevCoord = uint2(round(clamp(prevUV * float2(gridSz) - 0.5f , float2(0.0f , 0.0f) , float2(gridSz) - 1.0f)));
         info.useIndirect = useIndirect;
-        info.validUV = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f))) && checkDisocclusion(pixel , info.prevCoord);
+        info.validUV = !(any(gPrevUV > float2(1.0f , 1.0f)) || any(gPrevUV < float2(0.0f , 0.0f))) && checkDisocclusion(g , gPrev);
         return info;
     }
 
@@ -466,7 +486,6 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     // backstep
 
-    // ONLY NON SKYBOX
     void processBackStep(const float3 ideal , NKPDOptimal info , const bool valid)
     {
         Coop256 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;

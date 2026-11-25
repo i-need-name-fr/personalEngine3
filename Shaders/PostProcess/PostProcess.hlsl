@@ -3,11 +3,13 @@
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_SCENE_IMAGES_INCLUDED 1
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 #define MOX_VOL_SOURCE_INCLUDED 2
 #include "../../include/moxSourceCluster/VolSource.hlsl"
 #define MOX_TEXTURE_HUB_INCLUDED 3
 #include "../../include/moxSourceCluster/TextureHub.hlsl"
 #include "../../include/AI/CoopVec.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 #define MOX_NKPD_INCLUDED 4
 #include "../../include/AI/NKPD/NKPD.hlsl"
 
@@ -130,17 +132,13 @@ void main(uint3 id : SV_DispatchThreadID)
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
         HDRImage[id.xy] = float4(sky , diffuseImage[id.xy].w);
-        // the sky has no history ( the same as the spatial pass of ReBLUR writes )
-        if(features.NKPD) diffuseHistoryImage[id.xy] = float4(0.0f , 0.0f , 0.0f , 0.0f);
+        if(features.NKPD) diffuseHistoryImage[id.xy] = float4(0.0f , diffuseHistoryImage[id.xy].g , 0.0f , 0.0f);
         return ;
     }
 
     float3 diffuse = diffuseImage[id.xy].xyz;
-    float3 indirectSignal = indirectImage[id.xy].xyz;
+    float3 indirectSignal = upsampleIndirect(id.xy);
 
-    // the neural denoiser NKPD ( it works INSTEAD of ReBLUR ) : the temporal and the spatial part in one : the same net for the diffuse and the indirect signal
-    // the result goes back into diffuseImage / indirectImage : it is the history of the next frame ( prevDiffuseImage ) , the counters go to diffuseHistoryImage ( .r diffuse , .g indirect )
-    // the neighbours read the RAW signal of the same images : a neighbour that was already written gives its denoised value ( the order of the groups is not defined )
     if(features.NKPD)
     {
         AI::NKPD::NKPDOptimal info = AI::NKPD::buildNKPDInfo(id.xy , false);
@@ -149,13 +147,8 @@ void main(uint3 id : SV_DispatchThreadID)
         diffuse = AI::NKPD::askNKPD(info , count);
         const float diffuseCount = info.validUV ? min(count + 1.0f , AI::NKPD::MAX_ACCUM_FRAMES) : 1.0f;
 
-        info.useIndirect = true;
-        indirectSignal = AI::NKPD::askNKPD(info , count);
-        const float indirectCount = info.validUV ? min(count + 1.0f , AI::NKPD::MAX_ACCUM_FRAMES) : 1.0f;
-
         diffuseImage[id.xy] = float4(diffuse , 1.0f);
-        indirectImage[id.xy] = float4(indirectSignal , 1.0f);
-        diffuseHistoryImage[id.xy] = float4(diffuseCount , indirectCount , 0.0f , 0.0f);
+        diffuseHistoryImage[id.xy] = float4(diffuseCount , diffuseHistoryImage[id.xy].g , 0.0f , 0.0f);
     }
 
     const float3 specular = specularImage[id.xy].xyz;
@@ -168,7 +161,7 @@ void main(uint3 id : SV_DispatchThreadID)
     float3 result = direct * shadow * AO + specular + indirect;
 
     if(features.currentMode == INDIRECT_MODE){
-        HDRImage[id.xy] = indirectImage[id.xy];
+        HDRImage[id.xy] = float4(indirectSignal , 1.0f);
         return;
     }
 

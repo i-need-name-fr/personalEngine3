@@ -3,6 +3,7 @@
 #include "../moxNode/NodePass.hpp"
 #include "../moxSourceCluster/SceneBuffers.hpp"
 #include "../moxSourceCluster/SceneImages.hpp"
+#include "../moxSourceCluster/IndirectExtent.hpp"
 
 namespace mox
 {
@@ -67,8 +68,19 @@ namespace Passes
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
             constexpr std::uint32_t value = isIndirect ? 1u : 0u;
             vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(std::uint32_t) , &value);
-            vkCmdDispatch(cmd , x , y , 1);
-
+            if(value)
+            {
+                static const VkExtent2D extent = Source::indirectExtent(context->sc->extent);
+                static const std::uint32_t x = ( extent.width + 7) / 8;
+                static const std::uint32_t y = ( extent.height + 7) / 8;
+                vkCmdDispatch(cmd , x , y , 1);
+            }
+            else
+            {
+                static const std::uint32_t x = ( input.context->sc->extent.width + 7) / 8;
+                static const std::uint32_t y = ( input.context->sc->extent.height + 7) / 8;
+                vkCmdDispatch(cmd , x , y , 1);
+            }
             shaders[0] = nullptr;
 
             cmdBindShadersEXT(cmd , 1 , stage , shaders);

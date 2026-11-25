@@ -42,3 +42,6 @@
 #include "NKPDApply1.hpp"
 #include "NKPDApply2.hpp"
 #include "NKPDApply3.hpp"
+#include "RayTracingIndirect.hpp"
+#include "PathTracingIndirect.hpp"
+#include "NKPDInference.hpp"

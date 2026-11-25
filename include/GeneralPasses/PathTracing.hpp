@@ -123,7 +123,7 @@ namespace Passes
             // ----------------------------------------------------------------- the shaders
             // the order of the stages in this list is the order of the indices in the groups below
             const std::string dir = inputData.directory;
-            const std::array<StageFile , 13> files = {{
+            const std::array<StageFile , 10> files = {{
                 {dir + "RayGen.hlsl"             , VK_SHADER_STAGE_RAYGEN_BIT_KHR},      // 0
                 {dir + "shadowMiss.hlsl"         , VK_SHADER_STAGE_MISS_BIT_KHR},        // 1
                 {dir + "GI_miss.hlsl"            , VK_SHADER_STAGE_MISS_BIT_KHR},        // 2
@@ -134,9 +134,6 @@ namespace Passes
                 {dir + "GI_any_hit.hlsl"         , VK_SHADER_STAGE_ANY_HIT_BIT_KHR},     // 7
                 {dir + "ReflectionHit.hlsl"      , VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // 8
                 {dir + "ReflectionAnyHit.hlsl"   , VK_SHADER_STAGE_ANY_HIT_BIT_KHR},     // 9
-                {dir + "PTSecondaryMiss.hlsl"         , VK_SHADER_STAGE_MISS_BIT_KHR},        // 10
-                {dir + "PTSecondaryHit.hlsl"          , VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // 11
-                {dir + "PTSecondaryAlphaAnyHit.hlsl"  , VK_SHADER_STAGE_ANY_HIT_BIT_KHR},     // 12
             }};
 
             std::vector<pShaderModule2> modules{};
@@ -198,13 +195,10 @@ namespace Passes
             general(1 , Buffer::SBTGroupType::Miss);
             general(2 , Buffer::SBTGroupType::Miss);
             general(3 , Buffer::SBTGroupType::Miss);
-            // 3 secondary bounce ( ReSTIR PT )
-            general(10 , Buffer::SBTGroupType::Miss);
             // hit : 0 shadow , 1 GI , 2 reflection ( closest hit , any hit )
             hitGroup(4 , 5);
             hitGroup(6 , 7);
             hitGroup(8 , 9);
-            hitGroup(11 , 12);
 
             VkRayTracingPipelineCreateInfoKHR info{};
             info.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
@@ -213,19 +207,8 @@ namespace Passes
             info.pStages = stages.data();
             info.groupCount = static_cast<uint32_t>(groups.size());
             info.pGroups = groups.data();
-            // the recursion that the device can do : the pipeline can not ask for more than this
-            uint32_t deviceRecursionLimit = 1u;
-            {
-                VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{};
-                rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-                VkPhysicalDeviceProperties2 properties2{};
-                properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-                properties2.pNext = &rtProperties;
-                vkGetPhysicalDeviceProperties2(context->physicalDevice->device , &properties2);
-                deviceRecursionLimit = rtProperties.maxRayRecursionDepth;
-            }
-            // the secondary hit shader traces the next bounce itself ( MAX_PT_RAY_CAST bounces ) , and the shadow ray of the last one is one more level
-            info.maxPipelineRayRecursionDepth = std::min(static_cast<uint32_t>(MAX_PT_RAY_CAST) + 2u , deviceRecursionLimit);
+            // the rays of the shaders of this pass do not trace rays : the recursion of the raygen is 1 ( the path tracer of the indirect light is PathTracingIndirect )
+            info.maxPipelineRayRecursionDepth = 1;
             info.layout = pipe->layout->layout;
 
             {

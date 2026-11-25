@@ -75,11 +75,6 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
         writeColour(id.xy , showLinear(specularImage[id.xy].xyz));
         pixelCheck[id.xy] = UNDEFINED_PIXEL;
         return;
-    }else if(features.currentMode == INDIRECT_MODE){
-        // the indirect light is kept without the albedo ( PostProcess multiplies it ) : the same here
-        writeColour(id.xy , showLinear(indirectImage[id.xy].xyz * albedoImage[id.xy].xyz));
-        pixelCheck[id.xy] = UNDEFINED_PIXEL;
-        return;
     }else if(features.currentMode == HDR_RAW_MODE){
         writeColour(id.xy , showLinear(HDRImage[id.xy].xyz));
         pixelCheck[id.xy] = UNDEFINED_PIXEL;

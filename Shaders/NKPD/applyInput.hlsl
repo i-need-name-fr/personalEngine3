@@ -4,6 +4,7 @@
 #define MOX_SCENE_IMAGES_INCLUDED 2
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
 #include "../../include/AI/CoopVec.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 #define MOX_NKPD_INCLUDED 0
 #include "../../include/AI/NKPD/NKPD.hlsl"
 using namespace AI::NKPD;

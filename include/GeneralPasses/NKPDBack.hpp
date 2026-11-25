@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../moxNode/NodePass.hpp"
+#include "../moxSourceCluster/IndirectExtent.hpp"
 #include "../moxSourceCluster/SceneImages.hpp"
 #include "../moxSourceCluster/SceneBuffers.hpp"
 #include "../AI/NKPD/NKPD.hpp"
@@ -60,8 +61,10 @@ namespace Passes
 
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
 
-            static const std::uint32_t x = ( inputData.context->sc->extent.width / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
-            static const std::uint32_t y = ( inputData.context->sc->extent.height / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
+            // the samples of the training are the tiles of the grid of the signal : the full resolution for the diffuse , the resolution of indirectImage for the indirect light ( read every frame )
+            const VkExtent2D gridExtent = forIndirect ? Source::indirectExtent(inputData.context->sc->extent) : inputData.context->sc->extent;
+            const std::uint32_t x = ( gridExtent.width / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
+            const std::uint32_t y = ( gridExtent.height / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
             const uint32_t push = forIndirect ? 1 : 0 ;
             vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(uint32_t), &push);
             vkCmdDispatch(cmd , x , y , 1);

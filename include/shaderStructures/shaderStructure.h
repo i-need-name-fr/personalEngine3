@@ -76,6 +76,8 @@ static const float PI = 3.14159265f;
 #define PT_REQUIRED 1
 #define PT_NOT_REQUIRED 0
 
+#define MOX_INDIRECT_DIVISOR_RESOLUTION 2ul
+
 #define SHADING_RATE_1x1 0    // без флагов = 1x1
 #define SHADING_RATE_1x2 1    // Vertical2Pixels
 #define SHADING_RATE_1x4 2    // Vertical4Pixels

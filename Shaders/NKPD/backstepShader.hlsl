@@ -5,9 +5,11 @@
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_SCENE_IMAGES_INCLUDED 2
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
+#include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 #include "../../include/AI/CoopVec.hlsl"
 #define MOX_NKPD_INCLUDED 0
 #include "../../include/AI/NKPD/NKPD.hlsl"
+
 using namespace AI::NKPD;
 
 [[vk::push_constant]] struct {
@@ -18,9 +20,8 @@ using namespace AI::NKPD;
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    uint width , height;
-    depthImage.GetDimensions(width , height);
-    const uint2 size = uint2(width , height);
+    // the grid of the signal : the full resolution for the diffuse , the resolution of indirectImage for the indirect light
+    const uint2 size = gridSize(push.indirect);
     const uint2 tiles = (size + MOX_NKPD_RESOLUTION_DIVISOR - 1u) / MOX_NKPD_RESOLUTION_DIVISOR;
     const bool insideTile = all(id.xy < tiles);
 
@@ -29,7 +30,7 @@ void main(uint3 id : SV_DispatchThreadID)
     const uint2 pixel = min(id.xy * MOX_NKPD_RESOLUTION_DIVISOR + offset , size - 1u);
 
     // the sky has no ground truth
-    const bool valid = insideTile && (pixelCheck[pixel] == COLOR_PIXEL);
+    const bool valid = insideTile && (pixelCheck[gPixel(pixel , push.indirect)] == COLOR_PIXEL);
 
     const NKPDOptimal info = buildNKPDInfo(pixel , push.indirect);
     const float3 ideal = readIdeal(pixel , push.indirect);

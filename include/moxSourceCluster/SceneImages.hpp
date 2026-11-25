@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SourceCluster.hpp"
+#include "IndirectExtent.hpp"
 #include "../Vulkan/Image2/MultiViewImage2.hpp"
 #include "../utils/MultiScatterRoughness/MSR.hpp"
 
@@ -283,8 +284,12 @@ namespace Source
                 HDRImage[0] = std::make_shared<Image::RenderImage2>(info);
                 HDRImage[1] = std::make_shared<Image::RenderImage2>(info);
 
+                // indirect has its own resolution : the extent of the screen / MOX_INDIRECT_DIVISOR_RESOLUTION
+                const VkExtent2D fullExtent = info.extent;
+                info.extent = indirectExtent(fullExtent);
                 indirectImage[0] = std::make_shared<Image::RenderImage2>(info);
                 indirectImage[1] = std::make_shared<Image::RenderImage2>(info);
+                info.extent = fullExtent;
                 
                 info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -307,8 +312,10 @@ namespace Source
                 diffuseDistance[1] = std::make_shared<Image::RenderImage2>(info);
                 specularDistance[0] = std::make_shared<Image::RenderImage2>(info);
                 specularDistance[1] = std::make_shared<Image::RenderImage2>(info);
+                info.extent = indirectExtent(info.extent);
                 indirectDistance[0] = std::make_shared<Image::RenderImage2>(info);
                 indirectDistance[1] = std::make_shared<Image::RenderImage2>(info);
+                info.extent = context->sc->extent;
                 roughnessImage = std::make_shared<Image::RenderImage2>(info);
                 metallicImage = std::make_shared<Image::RenderImage2>(info);
                 pixelCheck = std::make_shared<Image::RenderImage2>(info);
