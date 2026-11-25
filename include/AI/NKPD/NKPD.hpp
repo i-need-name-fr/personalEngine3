@@ -68,7 +68,7 @@ namespace AI
             }
         }
 
-        Buffer::pNeuralBuffer<64 , 192 , "NKPD_input_Layer"> inputLayer;
+        Buffer::pNeuralBuffer<64 , 256 , "NKPD_input_Layer"> inputLayer;
         Buffer::pNeuralBuffer<64 , 64 , "NKPD_hidden_layer"> hiddenLayer;
         Buffer::pNeuralBuffer<16 , 64 ,"NKPD_output_layer"> outputLayer;
 
@@ -165,13 +165,13 @@ namespace AI
             {
                 // needsToWriteFile : the weights are written to the file when the net is destroyed , the same as NRC
                 {
-                    Buffer::NeuralBuffer<64 , 192 , "NKPD_input_Layer">::CreateInfo info{};
+                    Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">::CreateInfo info{};
                     info.context = context;
                     info.max = 0.001f;
                     info.min = 0.00001f;
                     info.needsToWriteFile = true;
 
-                    inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 192 , "NKPD_input_Layer">>(info);
+                    inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">>(info);
                 }
 
                 {

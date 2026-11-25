@@ -36,6 +36,11 @@ float readHistoryCount(uint2 p)
     return diffuseHistoryImage[p].r;
 }
 
+// the point of the last frame has to lie on the PLANE of the current surface : the distance to the plane is relative to the distance to the camera ( the error of the reprojection grows with it ) ,
+// 5 cm is the smallest allowed error ( the same as before for the near surfaces ) . the error ALONG the surface is not a reason to throw the history away
+static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
+static const float DISOCCLUSION_RELATIVE = 0.02f;
+
 bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
 
     const float3 centerPosition = positionImage[currentPixel].xyz;
@@ -47,8 +52,9 @@ bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
     // w == 0 marks a sky texel written by the miss shader
     if(prevPositionSample.w == 0.0f) return false;
 
-    const float positionDiff = length(centerPosition - prevPositionSample.xyz);
-    if(positionDiff > 0.05f) return false;
+    const float viewDistance = length(centerPosition - generalBuffer.playerPosition);
+    const float planeDistance = abs(dot(prevPositionSample.xyz - centerPosition , centerNormal));
+    if(planeDistance > max(DISOCCLUSION_MIN_DISTANCE , viewDistance * DISOCCLUSION_RELATIVE)) return false;
 
     const float normalDot = dot(centerNormal , nNormal);
     if(normalDot < 0.9f) return false;

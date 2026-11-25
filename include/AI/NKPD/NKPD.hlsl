@@ -9,7 +9,7 @@ namespace NKPD
 {
 [[vk::binding(  0   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<AI::NKPD::GeneralData> NKPDGeneral;
 
-// the input layer : 192 -> 64 ( 16 neighbours x 12 numbers )
+// the input layer : 256 -> 64 ( 16 neighbours x 16 numbers )
 [[vk::binding(  1   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> inputGradBuffer;
 [[vk::binding(  2   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> inputWeightBuffer;
 [[vk::binding(  3   ,   MOX_NKPD_INCLUDED    )]] ConstantBuffer<AI::OffsetData> inputOffsetBuffer;
@@ -94,8 +94,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     }
 
     static const uint32_t PIXEL_COUNT = 16;
-    // the numbers of ONE neighbour : nInput 3 , prevInput 3 , normalW , depthW , hit , colorDiff 3
-    static const uint FEATURE_COUNT = 12;
+    // the numbers of ONE neighbour ( FEATURE_COUNT = 16 ) : nInput 3 , prevInput 3 , normalW , depthW , hit , colorDiff 3 , and 4 free slots ( 12 .. 15 ) , they are 0 for now
+    static const uint FEATURE_COUNT = 16;
     // the length of the history ( the counter and 1 / alpha of the temporal part ) : the same as the temporal pass of ReBLUR
     static const float MAX_ACCUM_FRAMES = 64.0f;
     // the history after which the blur radius is the smallest : the same as the spatial pass of ReBLUR ( it is NOT the length of the history )
@@ -104,6 +104,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     static const float MAX_HIT_DISTANCE = 50.0f;
     static const float DEPTH_SIGMA = 8.0f;
     static const float NORMAL_POWER = 128.0f;
+    // a neighbour whose depth differs from the centre by more than this ( relative to the depth of the centre ) is NEVER used , it is another surface ( a lamp behind a pillar )
+    static const float NKPD_DEPTH_CUTOFF = 0.2f;
 
     float ComputeBlurRadius(float normalizedHitDist, float historyCount) {
         float baseRadius = normalizedHitDist * MAX_RADIUS_PIXELS;
@@ -155,6 +157,11 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         return diffuseHistoryImage[p].r;
     }
 
+    // the point of the last frame has to lie on the PLANE of the current surface : the distance to the plane is relative to the distance to the camera ( the error of the reprojection grows with it ) ,
+    // 5 cm is the smallest allowed error ( the same as before for the near surfaces ) . the error ALONG the surface is not a reason to throw the history away
+    static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
+    static const float DISOCCLUSION_RELATIVE = 0.02f;
+
     // does the pixel of the last frame show the same surface : the same check as the temporal pass of ReBLUR
     bool checkDisocclusion(const uint2 currentPixel , const uint2 prevPixel)
     {
@@ -167,8 +174,9 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         // w == 0 marks a sky texel written by the miss shader
         if(prevPositionSample.w == 0.0f) return false;
 
-        const float positionDiff = length(centerPosition - prevPositionSample.xyz);
-        if(positionDiff > 0.05f) return false;
+        const float viewDistance = length(centerPosition - generalBuffer.playerPosition);
+        const float planeDistance = abs(dot(prevPositionSample.xyz - centerPosition , centerNormal));
+        if(planeDistance > max(DISOCCLUSION_MIN_DISTANCE , viewDistance * DISOCCLUSION_RELATIVE)) return false;
 
         const float normalDot = dot(centerNormal , nNormal);
         if(normalDot < 0.9f) return false;
@@ -189,15 +197,16 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     #define NKPD_H(k) ((float16_t)data[k])
     #define NKPD_ROW(b) NKPD_H((b) + 0) , NKPD_H((b) + 1) , NKPD_H((b) + 2) , NKPD_H((b) + 3) , NKPD_H((b) + 4) , NKPD_H((b) + 5) , NKPD_H((b) + 6) , NKPD_H((b) + 7) ,                     NKPD_H((b) + 8) , NKPD_H((b) + 9) , NKPD_H((b) + 10) , NKPD_H((b) + 11) , NKPD_H((b) + 12) , NKPD_H((b) + 13) , NKPD_H((b) + 14) , NKPD_H((b) + 15)
-    Coop192 makeFirstLayerVector(const float data[FEATURE_COUNT * PIXEL_COUNT])
+    Coop256 makeFirstLayerVector(const float data[FEATURE_COUNT * PIXEL_COUNT])
     {
-        return coop::construct192(NKPD_ROW(0) , NKPD_ROW(16) , NKPD_ROW(32) , NKPD_ROW(48) , NKPD_ROW(64) , NKPD_ROW(80) ,
-                                NKPD_ROW(96) , NKPD_ROW(112) , NKPD_ROW(128) , NKPD_ROW(144) , NKPD_ROW(160) , NKPD_ROW(176));
+        return coop::construct256(NKPD_ROW(0) , NKPD_ROW(16) , NKPD_ROW(32) , NKPD_ROW(48) , NKPD_ROW(64) , NKPD_ROW(80) ,
+                                  NKPD_ROW(96) , NKPD_ROW(112) , NKPD_ROW(128) , NKPD_ROW(144) , NKPD_ROW(160) , NKPD_ROW(176) ,
+                                  NKPD_ROW(192) , NKPD_ROW(208) , NKPD_ROW(224) , NKPD_ROW(240));
     }
     #undef NKPD_ROW
     #undef NKPD_H
 
-    void fillFirstLayerVector(NKPDOptimal info , out float weights[PIXEL_COUNT] , out Coop192 firstLayerVector , out float3 radiances[PIXEL_COUNT])
+    void fillFirstLayerVector(NKPDOptimal info , out float weights[PIXEL_COUNT] , out Coop256 firstLayerVector , out float3 radiances[PIXEL_COUNT])
     {
         uint2 id = info.currentCoord;
         uint2 pid = info.prevCoord;
@@ -211,13 +220,16 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         distance = min(distance , MAX_HIT_DISTANCE);
         float radius = min(ComputeBlurRadius(NormalizeHitDistance(distance , cD , 0) , history ) , MAX_RADIUS_PIXELS);
 
-        // the centre is accumulated the same way as the neighbours ( below ) , so the colour difference compares accumulated with accumulated .
-        // it is the same formula as the temporal part of forwardNKPD
+        const float motionW = length(motionVector[id] * float2(width , height));
+
         const float centerAlpha = info.validUV ? 1.0f / min(history + 1.0f , MAX_ACCUM_FRAMES) : 1.0f;
-        const float3 centerAccumulated = lerp(readPrevInput(pid , info.useIndirect) , center , centerAlpha);
+        const float3 centerPrev = readPrevInput(pid , info.useIndirect);
+        const float3 centerAccumulated = lerp(centerPrev , center , centerAlpha);
+        const float centerLum = luminance(centerAccumulated);
+        const float centerDeviation = info.validUV ? abs(luminance(center) - luminance(centerPrev)) : 0.5f * luminance(center);
 
         static const uint stride = FEATURE_COUNT;
-        float data[FEATURE_COUNT * PIXEL_COUNT];
+        float data[FEATURE_COUNT * PIXEL_COUNT] = (float[FEATURE_COUNT * PIXEL_COUNT])0;
 
         uint patternSeed = initSeed(id.xy , generalBuffer.frameIndex);
         const float patternAngle = rand(patternSeed) * 2.0f * PI;
@@ -247,6 +259,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
                 data[i * stride + 9] = 0.0f;
                 data[i * stride + 10] = 0.0f;
                 data[i * stride + 11] = 0.0f;
+                data[i * stride + 12] = 0.0f;
+                data[i * stride + 13] = 0.0f;
+                data[i * stride + 14] = 0.0f;
+                data[i * stride + 15] = 0.0f;
 
                 continue;
             }
@@ -267,6 +283,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
                 data[i * stride + 9] = 0.0f;
                 data[i * stride + 10] = 0.0f;
                 data[i * stride + 11] = 0.0f;
+                data[i * stride + 12] = 0.0f;
+                data[i * stride + 13] = 0.0f;
+                data[i * stride + 14] = 0.0f;
+                data[i * stride + 15] = 0.0f;
 
                 continue;
             }
@@ -282,7 +302,6 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float3 prevInput = readPrevInput(prevPixel , info.useIndirect);
             const float pHistory = readHistoryCount(prevPixel , info.useIndirect);
 
-            // the position and the normal of the last frame have to match , the screen check alone gives ghosts on the edges of the objects
             const bool nValid = validUV && checkDisocclusion(samplePos , prevPixel);
 
             float alpha = 1.0f;
@@ -290,6 +309,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             {
                 alpha = 1.0f / min(pHistory + 1.0f , MAX_ACCUM_FRAMES);
             }
+
+            const float nRawLum = luminance(nInput);
+            const float nPrevLum = luminance(prevInput);
+            const float nDeviation = nValid ? abs(nRawLum - nPrevLum) : 0.5f * nRawLum;
 
             nInput = lerp(prevInput , nInput , alpha);
 
@@ -303,7 +326,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
             const float hit = readHitDistance(samplePos , info.useIndirect);
 
-            weights[i] = 1.0f;
+            const float relativeDeviation = min(nDeviation / ((nValid ? nPrevLum : nRawLum) + 0.01f) , 4.0f) * 0.25f;
+            const float zScore = min(abs(luminance(nInput) - centerLum) / (nDeviation + centerDeviation + 0.05f * centerLum + 0.01f) , 8.0f) * 0.125f;
+
+            weights[i] = (abs(cD - sDepth) / cD > NKPD_DEPTH_CUTOFF) ? 0.0f : depthW * normalW;
             data[i * stride] = nInput.x;
             data[i * stride + 1] = nInput.y;
             data[i * stride + 2] = nInput.z;
@@ -316,6 +342,11 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             data[i * stride + 9] = colorDiff.x;
             data[i * stride + 10] = colorDiff.y;
             data[i * stride + 11] = colorDiff.z;
+            data[i * stride + 12] = motionW;
+            data[i * stride + 13] = sqrt(alpha / (2 - alpha));
+            data[i * stride + 14] = relativeDeviation;
+            data[i * stride + 15] = zScore;
+
             radiances[i] = nInput;
         }
 
@@ -324,15 +355,12 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     // forward
 
-    // x , z1 , h1 , z2 , h2 : the vectors of the layers ( the backward needs them )
-    // o : the 16 raw outputs of the net ( before the sigmoid ) , weights : 1.0f / 0.0f , is the neighbour valid , radiances : the colours of the neighbours
-    // the weights of the neighbours are  w[i] = weights[i] * sigmoid( o[i] ) , wSum is their sum : both are rebuilt from o and weights
     float3 forwardNKPD(NKPDOptimal info ,
-                    out Coop192 x , out Coop64 z1 , out Coop64 h1 , out Coop64 z2 , out Coop64 h2 ,
+                    out Coop256 x , out Coop64 z1 , out Coop64 h1 , out Coop64 z2 , out Coop64 h2 ,
                     out Coop16 o , out float weights[PIXEL_COUNT] , out float3 radiances[PIXEL_COUNT] ,
                     out float history)
     {
-        Coop192 input;
+        Coop256 input;
         fillFirstLayerVector(info , weights , input , radiances);
         x = input;
         const BufPtr pInputWeights = BufPtr(inputPtrBuffer.pWeightBuffer);
@@ -341,7 +369,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
         Coop64 inputResult = coop::matMulAdd<Coop64>(input , NP_F16 , pInputWeights.Get().data , 0 , NP_F16,
                                                     pInputWeights.Get().data , int(inputOffsetBuffer.BIAS_OFFSET) , NP_F16,
-                                                    64 , 192 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 192 * 2 , 0);
+                                                    64 , 256 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 256 * 2 , 0);
 
 
         z1 = inputResult;
@@ -428,7 +456,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     float3 askNKPD(NKPDOptimal info , out float history)
     {
-        Coop192 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
+        Coop256 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
         Coop16 o ;
         float weights[PIXEL_COUNT];
         float3 radiances[PIXEL_COUNT];
@@ -441,7 +469,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     // ONLY NON SKYBOX
     void processBackStep(const float3 ideal , NKPDOptimal info , const bool valid)
     {
-        Coop192 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
+        Coop256 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
         Coop16 o ;
         float weights[PIXEL_COUNT];
         float3 radiances[PIXEL_COUNT];
@@ -465,7 +493,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float s = 1.0f / (1.0f + exp(-raw));
             const float dw_draw = weights[i] * s * (1.0f - s);                    
             const float dL_dw = dot(g , radiances[i] - result) / (1.0f + wSum);
-            dOut[i] = dL_dw * dw_draw * (valid ? 1.0f / 16.0f : 0.0f) * weights[i];  
+            dOut[i] = dL_dw * dw_draw * (valid ? 1.0f / 16.0f : 0.0f);  
         }
         Coop16 inversedCoop = coop::construct16(float16_t(dOut[0]) , float16_t(dOut[1]) , float16_t(dOut[2]), float16_t(dOut[3])
                                             , float16_t(dOut[4]) , float16_t(dOut[5]) ,float16_t(dOut[6]) ,float16_t(dOut[7])
@@ -493,7 +521,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         Coop64 layer1 = coop::matMul<Coop64>(dz2 , NP_F16 , pHiddenWeights.Get().data , int(hiddenOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 64 , 64 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 64 * 2 , 0);
         Coop64 gate1 = coop::reluGate(z1);
         Coop64 dz1 = coop::mul(layer1 , gate1);
-        coop::outerProduct(pInputGrads.Get().data , 0 , dz1 , x , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 192 * 2);
+        coop::outerProduct(pInputGrads.Get().data , 0 , dz1 , x , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 256 * 2);
 
         coop::reduceSum(pOutputGrads.Get().data , outputOffsetBuffer.BIAS_GRAD_OFFSET , inversedCoop);
         coop::reduceSum(pHiddenGrads.Get().data , hiddenOffsetBuffer.BIAS_GRAD_OFFSET , dz2);
@@ -510,7 +538,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint validCount = NKPDGeneral[0].validCount;
         if(validCount == 0) return;
         const uint pos = id.x;
-        static const uint matrixSize = 64 * 192;
+        static const uint matrixSize = 64 * 256;
         const uint totalSize = matrixSize + 64;
         if(pos >= totalSize) return;
         float g = 0.0f;

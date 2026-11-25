@@ -7,7 +7,7 @@ using Coop = vk::SpirvType<5288 , N * 2 , 2 , float16_t , vk::integral_constant<
 typedef Coop<16> Coop16;
 typedef Coop<32> Coop32;
 typedef Coop<64> Coop64;
-typedef Coop<256> Coop256;   // the input of NKPD : 24 neighbours x ~11 features , padded to 256
+typedef Coop<256> Coop256;   // the input of NKPD : 16 neighbours x 16 features
 typedef Coop<176> Coop176;   // the input of NKPD : 16 neighbours x 11 features
 typedef Coop<192> Coop192;   // the input of NKPD : 16 neighbours x 12 features
 
