@@ -7,10 +7,10 @@ using Coop = vk::SpirvType<5288 , N * 2 , 2 , float16_t , vk::integral_constant<
 typedef Coop<16> Coop16;
 typedef Coop<32> Coop32;
 typedef Coop<64> Coop64;
+typedef Coop<256> Coop256;   // the input of NKPD : 24 neighbours x ~11 features , padded to 256
+typedef Coop<176> Coop176;   // the input of NKPD : 16 neighbours x 11 features
+typedef Coop<192> Coop192;   // the input of NKPD : 16 neighbours x 12 features
 
-// ---------------------------------------------------------------- the atomic add of a float32 ( SPV_EXT_shader_atomic_float_add , OpAtomicFAddEXT ) : the scalar one , for a buffer of floats
-// the device has to have shaderBufferFloat32AtomicAdd ( LogicalDevice.hpp turns it on ) . the pointer is an element of a buffer : atomicAddFloat( buffer[ i ] , ATOMIC_SCOPE_DEVICE , ATOMIC_SEMANTICS_RELAXED , value ) ,
-// the old value is given back
 static const uint ATOMIC_SCOPE_DEVICE = 1u;          // the memory scope : the whole device ( 2 : the workgroup , 3 : the subgroup )
 static const uint ATOMIC_SCOPE_WORKGROUP = 2u;
 static const uint ATOMIC_SEMANTICS_RELAXED = 0u;     // no ordering of the memory : an add does not need it
@@ -23,7 +23,6 @@ float atomicAddFloat([[vk::ext_reference]] float pointer , uint scope , uint sem
 namespace coop
 {
 
-// the size of a vector as a COMPILE TIME constant : coop::Size<Coop64>::value . M and K of the matrix operations have to be constants ( SPIR-V : "M is not a constant instruction" ) , so they cannot come from a buffer
 template<typename V> struct Size;
 template<int N> struct Size< Coop<N> > { static const int value = N; };
 
@@ -84,6 +83,57 @@ Coop64 construct64(float16_t a0 , float16_t a1 , float16_t a2 , float16_t a3 , f
                    float16_t a40 , float16_t a41 , float16_t a42 , float16_t a43 , float16_t a44 , float16_t a45 , float16_t a46 , float16_t a47 ,
                    float16_t a48 , float16_t a49 , float16_t a50 , float16_t a51 , float16_t a52 , float16_t a53 , float16_t a54 , float16_t a55 ,
                    float16_t a56 , float16_t a57 , float16_t a58 , float16_t a59 , float16_t a60 , float16_t a61 , float16_t a62 , float16_t a63);
+
+[[vk::ext_capability(5394)]]
+[[vk::ext_extension("SPV_NV_cooperative_vector")]]
+[[vk::ext_instruction(80)]]
+Coop256 construct256(float16_t a0 , float16_t a1 , float16_t a2 , float16_t a3 , float16_t a4 , float16_t a5 , float16_t a6 , float16_t a7 , float16_t a8 , float16_t a9 , float16_t a10 , float16_t a11 , float16_t a12 , float16_t a13 , float16_t a14 , float16_t a15 ,
+                    float16_t a16 , float16_t a17 , float16_t a18 , float16_t a19 , float16_t a20 , float16_t a21 , float16_t a22 , float16_t a23 , float16_t a24 , float16_t a25 , float16_t a26 , float16_t a27 , float16_t a28 , float16_t a29 , float16_t a30 , float16_t a31 ,
+                    float16_t a32 , float16_t a33 , float16_t a34 , float16_t a35 , float16_t a36 , float16_t a37 , float16_t a38 , float16_t a39 , float16_t a40 , float16_t a41 , float16_t a42 , float16_t a43 , float16_t a44 , float16_t a45 , float16_t a46 , float16_t a47 ,
+                    float16_t a48 , float16_t a49 , float16_t a50 , float16_t a51 , float16_t a52 , float16_t a53 , float16_t a54 , float16_t a55 , float16_t a56 , float16_t a57 , float16_t a58 , float16_t a59 , float16_t a60 , float16_t a61 , float16_t a62 , float16_t a63 ,
+                    float16_t a64 , float16_t a65 , float16_t a66 , float16_t a67 , float16_t a68 , float16_t a69 , float16_t a70 , float16_t a71 , float16_t a72 , float16_t a73 , float16_t a74 , float16_t a75 , float16_t a76 , float16_t a77 , float16_t a78 , float16_t a79 ,
+                    float16_t a80 , float16_t a81 , float16_t a82 , float16_t a83 , float16_t a84 , float16_t a85 , float16_t a86 , float16_t a87 , float16_t a88 , float16_t a89 , float16_t a90 , float16_t a91 , float16_t a92 , float16_t a93 , float16_t a94 , float16_t a95 ,
+                    float16_t a96 , float16_t a97 , float16_t a98 , float16_t a99 , float16_t a100 , float16_t a101 , float16_t a102 , float16_t a103 , float16_t a104 , float16_t a105 , float16_t a106 , float16_t a107 , float16_t a108 , float16_t a109 , float16_t a110 , float16_t a111 ,
+                    float16_t a112 , float16_t a113 , float16_t a114 , float16_t a115 , float16_t a116 , float16_t a117 , float16_t a118 , float16_t a119 , float16_t a120 , float16_t a121 , float16_t a122 , float16_t a123 , float16_t a124 , float16_t a125 , float16_t a126 , float16_t a127 ,
+                    float16_t a128 , float16_t a129 , float16_t a130 , float16_t a131 , float16_t a132 , float16_t a133 , float16_t a134 , float16_t a135 , float16_t a136 , float16_t a137 , float16_t a138 , float16_t a139 , float16_t a140 , float16_t a141 , float16_t a142 , float16_t a143 ,
+                    float16_t a144 , float16_t a145 , float16_t a146 , float16_t a147 , float16_t a148 , float16_t a149 , float16_t a150 , float16_t a151 , float16_t a152 , float16_t a153 , float16_t a154 , float16_t a155 , float16_t a156 , float16_t a157 , float16_t a158 , float16_t a159 ,
+                    float16_t a160 , float16_t a161 , float16_t a162 , float16_t a163 , float16_t a164 , float16_t a165 , float16_t a166 , float16_t a167 , float16_t a168 , float16_t a169 , float16_t a170 , float16_t a171 , float16_t a172 , float16_t a173 , float16_t a174 , float16_t a175 ,
+                    float16_t a176 , float16_t a177 , float16_t a178 , float16_t a179 , float16_t a180 , float16_t a181 , float16_t a182 , float16_t a183 , float16_t a184 , float16_t a185 , float16_t a186 , float16_t a187 , float16_t a188 , float16_t a189 , float16_t a190 , float16_t a191 ,
+                    float16_t a192 , float16_t a193 , float16_t a194 , float16_t a195 , float16_t a196 , float16_t a197 , float16_t a198 , float16_t a199 , float16_t a200 , float16_t a201 , float16_t a202 , float16_t a203 , float16_t a204 , float16_t a205 , float16_t a206 , float16_t a207 ,
+                    float16_t a208 , float16_t a209 , float16_t a210 , float16_t a211 , float16_t a212 , float16_t a213 , float16_t a214 , float16_t a215 , float16_t a216 , float16_t a217 , float16_t a218 , float16_t a219 , float16_t a220 , float16_t a221 , float16_t a222 , float16_t a223 ,
+                    float16_t a224 , float16_t a225 , float16_t a226 , float16_t a227 , float16_t a228 , float16_t a229 , float16_t a230 , float16_t a231 , float16_t a232 , float16_t a233 , float16_t a234 , float16_t a235 , float16_t a236 , float16_t a237 , float16_t a238 , float16_t a239 ,
+                    float16_t a240 , float16_t a241 , float16_t a242 , float16_t a243 , float16_t a244 , float16_t a245 , float16_t a246 , float16_t a247 , float16_t a248 , float16_t a249 , float16_t a250 , float16_t a251 , float16_t a252 , float16_t a253 , float16_t a254 , float16_t a255);
+
+[[vk::ext_capability(5394)]]
+[[vk::ext_extension("SPV_NV_cooperative_vector")]]
+[[vk::ext_instruction(80)]]
+Coop176 construct176(float16_t a0 , float16_t a1 , float16_t a2 , float16_t a3 , float16_t a4 , float16_t a5 , float16_t a6 , float16_t a7 , float16_t a8 , float16_t a9 , float16_t a10 , float16_t a11 , float16_t a12 , float16_t a13 , float16_t a14 , float16_t a15 ,
+                    float16_t a16 , float16_t a17 , float16_t a18 , float16_t a19 , float16_t a20 , float16_t a21 , float16_t a22 , float16_t a23 , float16_t a24 , float16_t a25 , float16_t a26 , float16_t a27 , float16_t a28 , float16_t a29 , float16_t a30 , float16_t a31 ,
+                    float16_t a32 , float16_t a33 , float16_t a34 , float16_t a35 , float16_t a36 , float16_t a37 , float16_t a38 , float16_t a39 , float16_t a40 , float16_t a41 , float16_t a42 , float16_t a43 , float16_t a44 , float16_t a45 , float16_t a46 , float16_t a47 ,
+                    float16_t a48 , float16_t a49 , float16_t a50 , float16_t a51 , float16_t a52 , float16_t a53 , float16_t a54 , float16_t a55 , float16_t a56 , float16_t a57 , float16_t a58 , float16_t a59 , float16_t a60 , float16_t a61 , float16_t a62 , float16_t a63 ,
+                    float16_t a64 , float16_t a65 , float16_t a66 , float16_t a67 , float16_t a68 , float16_t a69 , float16_t a70 , float16_t a71 , float16_t a72 , float16_t a73 , float16_t a74 , float16_t a75 , float16_t a76 , float16_t a77 , float16_t a78 , float16_t a79 ,
+                    float16_t a80 , float16_t a81 , float16_t a82 , float16_t a83 , float16_t a84 , float16_t a85 , float16_t a86 , float16_t a87 , float16_t a88 , float16_t a89 , float16_t a90 , float16_t a91 , float16_t a92 , float16_t a93 , float16_t a94 , float16_t a95 ,
+                    float16_t a96 , float16_t a97 , float16_t a98 , float16_t a99 , float16_t a100 , float16_t a101 , float16_t a102 , float16_t a103 , float16_t a104 , float16_t a105 , float16_t a106 , float16_t a107 , float16_t a108 , float16_t a109 , float16_t a110 , float16_t a111 ,
+                    float16_t a112 , float16_t a113 , float16_t a114 , float16_t a115 , float16_t a116 , float16_t a117 , float16_t a118 , float16_t a119 , float16_t a120 , float16_t a121 , float16_t a122 , float16_t a123 , float16_t a124 , float16_t a125 , float16_t a126 , float16_t a127 ,
+                    float16_t a128 , float16_t a129 , float16_t a130 , float16_t a131 , float16_t a132 , float16_t a133 , float16_t a134 , float16_t a135 , float16_t a136 , float16_t a137 , float16_t a138 , float16_t a139 , float16_t a140 , float16_t a141 , float16_t a142 , float16_t a143 ,
+                    float16_t a144 , float16_t a145 , float16_t a146 , float16_t a147 , float16_t a148 , float16_t a149 , float16_t a150 , float16_t a151 , float16_t a152 , float16_t a153 , float16_t a154 , float16_t a155 , float16_t a156 , float16_t a157 , float16_t a158 , float16_t a159 ,
+                    float16_t a160 , float16_t a161 , float16_t a162 , float16_t a163 , float16_t a164 , float16_t a165 , float16_t a166 , float16_t a167 , float16_t a168 , float16_t a169 , float16_t a170 , float16_t a171 , float16_t a172 , float16_t a173 , float16_t a174 , float16_t a175);
+
+[[vk::ext_capability(5394)]]
+[[vk::ext_extension("SPV_NV_cooperative_vector")]]
+[[vk::ext_instruction(80)]]
+Coop192 construct192(float16_t a0 , float16_t a1 , float16_t a2 , float16_t a3 , float16_t a4 , float16_t a5 , float16_t a6 , float16_t a7 , float16_t a8 , float16_t a9 , float16_t a10 , float16_t a11 , float16_t a12 , float16_t a13 , float16_t a14 , float16_t a15 ,
+                    float16_t a16 , float16_t a17 , float16_t a18 , float16_t a19 , float16_t a20 , float16_t a21 , float16_t a22 , float16_t a23 , float16_t a24 , float16_t a25 , float16_t a26 , float16_t a27 , float16_t a28 , float16_t a29 , float16_t a30 , float16_t a31 ,
+                    float16_t a32 , float16_t a33 , float16_t a34 , float16_t a35 , float16_t a36 , float16_t a37 , float16_t a38 , float16_t a39 , float16_t a40 , float16_t a41 , float16_t a42 , float16_t a43 , float16_t a44 , float16_t a45 , float16_t a46 , float16_t a47 ,
+                    float16_t a48 , float16_t a49 , float16_t a50 , float16_t a51 , float16_t a52 , float16_t a53 , float16_t a54 , float16_t a55 , float16_t a56 , float16_t a57 , float16_t a58 , float16_t a59 , float16_t a60 , float16_t a61 , float16_t a62 , float16_t a63 ,
+                    float16_t a64 , float16_t a65 , float16_t a66 , float16_t a67 , float16_t a68 , float16_t a69 , float16_t a70 , float16_t a71 , float16_t a72 , float16_t a73 , float16_t a74 , float16_t a75 , float16_t a76 , float16_t a77 , float16_t a78 , float16_t a79 ,
+                    float16_t a80 , float16_t a81 , float16_t a82 , float16_t a83 , float16_t a84 , float16_t a85 , float16_t a86 , float16_t a87 , float16_t a88 , float16_t a89 , float16_t a90 , float16_t a91 , float16_t a92 , float16_t a93 , float16_t a94 , float16_t a95 ,
+                    float16_t a96 , float16_t a97 , float16_t a98 , float16_t a99 , float16_t a100 , float16_t a101 , float16_t a102 , float16_t a103 , float16_t a104 , float16_t a105 , float16_t a106 , float16_t a107 , float16_t a108 , float16_t a109 , float16_t a110 , float16_t a111 ,
+                    float16_t a112 , float16_t a113 , float16_t a114 , float16_t a115 , float16_t a116 , float16_t a117 , float16_t a118 , float16_t a119 , float16_t a120 , float16_t a121 , float16_t a122 , float16_t a123 , float16_t a124 , float16_t a125 , float16_t a126 , float16_t a127 ,
+                    float16_t a128 , float16_t a129 , float16_t a130 , float16_t a131 , float16_t a132 , float16_t a133 , float16_t a134 , float16_t a135 , float16_t a136 , float16_t a137 , float16_t a138 , float16_t a139 , float16_t a140 , float16_t a141 , float16_t a142 , float16_t a143 ,
+                    float16_t a144 , float16_t a145 , float16_t a146 , float16_t a147 , float16_t a148 , float16_t a149 , float16_t a150 , float16_t a151 , float16_t a152 , float16_t a153 , float16_t a154 , float16_t a155 , float16_t a156 , float16_t a157 , float16_t a158 , float16_t a159 ,
+                    float16_t a160 , float16_t a161 , float16_t a162 , float16_t a163 , float16_t a164 , float16_t a165 , float16_t a166 , float16_t a167 , float16_t a168 , float16_t a169 , float16_t a170 , float16_t a171 , float16_t a172 , float16_t a173 , float16_t a174 , float16_t a175 ,
+                    float16_t a176 , float16_t a177 , float16_t a178 , float16_t a179 , float16_t a180 , float16_t a181 , float16_t a182 , float16_t a183 , float16_t a184 , float16_t a185 , float16_t a186 , float16_t a187 , float16_t a188 , float16_t a189 , float16_t a190 , float16_t a191);
 
 // one component with the number written in the code ( OpCompositeExtract ) : the index is a literal , it cannot be a variable
 template<typename V>

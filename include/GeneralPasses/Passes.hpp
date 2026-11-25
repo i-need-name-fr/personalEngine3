@@ -37,3 +37,8 @@
 #include "NRCApply1.hpp"
 #include "NRCApply2.hpp"
 #include "NRCApply3.hpp"
+#include "NKPDTrain.hpp"
+#include "NKPDBack.hpp"
+#include "NKPDApply1.hpp"
+#include "NKPDApply2.hpp"
+#include "NKPDApply3.hpp"

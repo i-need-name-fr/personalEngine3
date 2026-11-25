@@ -39,6 +39,7 @@ namespace mox
             Source::pAtmoScat atmo{};
             Source::pSharcHeap sharc{};
             Source::AI::pNeuralRadianceCache nrc{};
+            Source::AI::pNKPD nkpd;
         } sources;
 
 
@@ -141,10 +142,17 @@ namespace mox
             nrcp1 = nullptr;
             nrcp2 = nullptr;
             nrcp3 = nullptr;
+            nkpdt = nullptr;
+            nkpdb = nullptr;
+            nkpdbi = nullptr;
+            nkpdp1 = nullptr;
+            nkpdp2 = nullptr;
+            nkpdp3 = nullptr;
 
             step("the graph");
             graph = RenderGraph{};
             recordFunction = {};
+            sources.nkpd = nullptr;
             sources.nrc = nullptr;
             step("the sky manager");
             skyManager = nullptr;
@@ -267,6 +275,10 @@ namespace mox
 
                     {
                         sources.nrc = std::make_shared<Source::AI::NeuralRadianceCache>(context.get());
+                    }
+
+                    {
+                        sources.nkpd = std::make_shared<Source::AI::NKPD>(context.get());
                     }
                 }
             }
@@ -422,7 +434,7 @@ namespace mox
                 {
                     SourceCluster* clusters[] = {
                         sources.buffers.get() , sources.images.get() , sources.atmo.get() , eForge->heap.get() , sources.textures.get() ,
-                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get() , sources.nrc.get()
+                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get() , sources.nrc.get() , sources.nkpd.get()
                     };
 
                     for(SourceCluster* cluster : clusters)
@@ -599,6 +611,49 @@ namespace mox
                     nrcp3 = std::make_shared<Passes::NRCApply3>(info);
                 }
 
+                // NKPD : the counters of the step , the backward ( two passes : the diffuse and the indirect signal , the push constant is the template argument ) and the Adam of the 3 layers
+                {
+                    Passes::NKPDTrain::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/trainingShader";
+                    nkpdt = std::make_shared<Passes::NKPDTrain>(info);
+                }
+
+                {
+                    Passes::NKPDBack<0>::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/backstepShader";
+                    nkpdb = std::make_shared<Passes::NKPDBack<0>>(info);
+                }
+
+                {
+                    Passes::NKPDBack<1>::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/backstepShader";
+                    nkpdbi = std::make_shared<Passes::NKPDBack<1>>(info);
+                }
+
+                {
+                    Passes::NKPDApply1::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/applyInput";
+                    nkpdp1 = std::make_shared<Passes::NKPDApply1>(info);
+                }
+
+                {
+                    Passes::NKPDApply2::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/applyHidden";
+                    nkpdp2 = std::make_shared<Passes::NKPDApply2>(info);
+                }
+
+                {
+                    Passes::NKPDApply3::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/applyOutput";
+                    nkpdp3 = std::make_shared<Passes::NKPDApply3>(info);
+                }
+
                 {
                     Passes::GUIPass::CreateInfo info{};
                     info.context = ctx;
@@ -609,7 +664,10 @@ namespace mox
                 {
                     NodePass* order[] = {
                         deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , rt.get() , ao.get() , bf.get() ,
-                        reblurt.get() , reblurs.get() , reblurt_indirect.get() , reblurs_indirect.get() ,
+                        // the indirect one after the indirect spatial pass . the counters first , the Adam of the 3 layers ( and the translate of the weights ) after both backward passes
+                        reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
+                        reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
+                        nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
                         relaxt.get() , relaxs.get() ,
                         volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
@@ -633,11 +691,12 @@ namespace mox
                 //     }
                 // }
 
-                // the path tracing path : the same passes as the ray tracing one , the ReSTIR PT pass instead of the RT one
                 {
                     NodePass* order[] = {
                         deferred.get() , mrt.get() , forward.get(), nrct.get() , nrcb.get() , nrcp1.get() , nrcp2.get() , nrcp3.get() , sharcPass.get() , pt.get() , ao.get() , bf.get() ,
-                        reblurt.get() , reblurs.get() , reblurt_indirect.get() , reblurs_indirect.get() ,
+                        reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
+                        reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
+                        nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
                         relaxt.get() , relaxs.get() ,
                         volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
@@ -682,8 +741,6 @@ namespace mox
                 reset = false;
             }
             context->stream->setConstants(slData);
-            // the state of DLSS-G once per ~2 seconds in the log : status 0 = eOk , the others say WHY the frame generation is off ( eFailCommonConstantsInvalid = the camera constants are wrong ,
-            // eFailReflexNotDetectedAtRuntime , eFailGetCurrentBackBufferIndexNotCalled , eFailResolutionTooLow , ... ) . numFramesActuallyPresented 1 = nothing is generated , 2+ = it works
             {
                 static uint32_t dlssgCounter = 0u;
                 if((dlssgCounter++ % 120u) == 60u)
@@ -742,6 +799,8 @@ namespace mox
             featureSettings.NRC = false;
             featureSettings.ReSTIRSSS = true;
             featureSettings.sssScale = 1.0f;
+            featureSettings.NKPD = false;
+            featureSettings.NKPDTrain = false;
 
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
@@ -812,8 +871,36 @@ namespace mox
 
             gui::Separator();
 
+            applyNKPDRules(general , features);
+
             gui::End();
             gui::Render();
+        }
+
+        void applyNKPDRules(GeneralInfo &general , GeneralFeatures &features) noexcept{
+            static uint32_t prevReBLUR = 1u;
+            static uint32_t prevNKPD = 0u;
+
+            if(features.NKPD && !prevNKPD)
+            {
+                general.ReBLUR = 0u;
+            }
+            else if(general.ReBLUR && !prevReBLUR)
+            {
+                features.NKPD = 0u;
+            }
+
+            // what always has to be true
+            if(features.NKPD)
+            {
+                general.ReBLUR = 0u;
+                features.NKPDTrain = 0u;
+            }
+            if(!general.ReBLUR) features.NKPDTrain = 0u;
+            if(features.NKPDTrain) features.NKPD = 0u;
+
+            prevReBLUR = general.ReBLUR;
+            prevNKPD = features.NKPD;
         }
 
         void drawSettingsForGeneralData(GeneralInfo &info) noexcept{
@@ -1045,6 +1132,26 @@ namespace mox
                         info.NRC = !info.NRC;
                     }
                 }
+                gui::Separator();
+                gui::Spacing();
+            }
+
+            {
+                // the training is on : NKPD can not be turned on
+                gui::BeginDisabled(info.NKPDTrain != 0u);
+                if(gui::Button(info.NKPD ? "NKPD USE ON" : "NKPD USE OFF"))
+                {
+                    info.NKPD = !info.NKPD;
+                }
+                gui::EndDisabled();
+
+                // NKPD is on or ReBLUR is off : there is no ground truth to learn from
+                gui::BeginDisabled(info.NKPD != 0u || info.ReBLUR == 0u);
+                if(gui::Button(info.NKPDTrain ? "NKPD TRAIN ON" : "NKPD TRAIN OFF"))
+                {
+                    info.NKPDTrain = !info.NKPDTrain;
+                }
+                gui::EndDisabled();
                 gui::Separator();
                 gui::Spacing();
             }
@@ -1299,6 +1406,13 @@ namespace mox
         Passes::pNRCApply1 nrcp1{};
         Passes::pNRCApply2 nrcp2{};
         Passes::pNRCApply3 nrcp3{};
+
+        Passes::pNKPDTrain nkpdt{};
+        Passes::pNKPDBack<0> nkpdb{};
+        Passes::pNKPDBack<1> nkpdbi{};
+        Passes::pNKPDApply1 nkpdp1{};
+        Passes::pNKPDApply2 nkpdp2{};
+        Passes::pNKPDApply3 nkpdp3{};
 
         Passes::pGUIPass guiPass{};
 

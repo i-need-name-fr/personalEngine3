@@ -7,6 +7,9 @@
 #include "../../include/moxSourceCluster/VolSource.hlsl"
 #define MOX_TEXTURE_HUB_INCLUDED 3
 #include "../../include/moxSourceCluster/TextureHub.hlsl"
+#include "../../include/AI/CoopVec.hlsl"
+#define MOX_NKPD_INCLUDED 4
+#include "../../include/AI/NKPD/NKPD.hlsl"
 
 static const float FOG_SKY_DISTANCE = 20000.0f;
 
@@ -127,17 +130,41 @@ void main(uint3 id : SV_DispatchThreadID)
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
         HDRImage[id.xy] = float4(sky , diffuseImage[id.xy].w);
+        // the sky has no history ( the same as the spatial pass of ReBLUR writes )
+        if(features.NKPD) diffuseHistoryImage[id.xy] = float4(0.0f , 0.0f , 0.0f , 0.0f);
         return ;
     }
 
-    const float3 diffuse = diffuseImage[id.xy].xyz;
+    float3 diffuse = diffuseImage[id.xy].xyz;
+    float3 indirectSignal = indirectImage[id.xy].xyz;
+
+    // the neural denoiser NKPD ( it works INSTEAD of ReBLUR ) : the temporal and the spatial part in one : the same net for the diffuse and the indirect signal
+    // the result goes back into diffuseImage / indirectImage : it is the history of the next frame ( prevDiffuseImage ) , the counters go to diffuseHistoryImage ( .r diffuse , .g indirect )
+    // the neighbours read the RAW signal of the same images : a neighbour that was already written gives its denoised value ( the order of the groups is not defined )
+    if(features.NKPD)
+    {
+        AI::NKPD::NKPDOptimal info = AI::NKPD::buildNKPDInfo(id.xy , false);
+        float count = 0.0f;
+
+        diffuse = AI::NKPD::askNKPD(info , count);
+        const float diffuseCount = info.validUV ? min(count + 1.0f , AI::NKPD::MAX_ACCUM_FRAMES) : 1.0f;
+
+        info.useIndirect = true;
+        indirectSignal = AI::NKPD::askNKPD(info , count);
+        const float indirectCount = info.validUV ? min(count + 1.0f , AI::NKPD::MAX_ACCUM_FRAMES) : 1.0f;
+
+        diffuseImage[id.xy] = float4(diffuse , 1.0f);
+        indirectImage[id.xy] = float4(indirectSignal , 1.0f);
+        diffuseHistoryImage[id.xy] = float4(diffuseCount , indirectCount , 0.0f , 0.0f);
+    }
+
     const float3 specular = specularImage[id.xy].xyz;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
     const float3 direct = diffuse * albedo;
     const float linearDepth = depthImage[id.xy].x;
     const float shadow = saturate(pow(max(fShadowImage[id.xy].x , 0.0001f) , features.shadowThickness));
     const float AO = pow(fAmbientImage[id.xy].x , features.AO_intens);
-    const float3 indirect = indirectImage[id.xy].xyz * albedo;
+    const float3 indirect = indirectSignal * albedo;
     float3 result = direct * shadow * AO + specular + indirect;
 
     if(features.currentMode == INDIRECT_MODE){

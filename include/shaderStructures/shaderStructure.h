@@ -613,6 +613,7 @@ struct GeneralFeatures{
     float sunShadowFade;
 
     uint32_t NKPD;
+    uint32_t NKPDTrain;
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
 
@@ -660,6 +661,7 @@ struct GeneralFeatures{
     float sunShadowFade;
 
     uint32_t NKPD;
+    uint32_t NKPDTrain;
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
 
@@ -894,6 +896,7 @@ namespace ms
 #define MOX_NRC_HASH_GRID_F 2ul
 #define MOX_NRC_RESOLUTION_DIVISOR 16ul
 
+#define MOX_NKPD_RESOLUTION_DIVISOR 8ul
 namespace AI
 {
     struct Parameter
@@ -974,6 +977,25 @@ namespace AI
         };
     #endif
 
+        struct GeneralData
+        {
+    #ifdef __cplusplus
+            uint32_t width;
+            uint32_t height;
+            uint32_t validCount;
+            uint32_t stepCount;
+    #else
+            uint width;
+            uint height;
+            uint validCount;
+            uint stepCount;
+    #endif
+        };
+    }
+
+    namespace NKPD
+    {
+        // the same role as AI::NRC::GeneralData : stepCount is the step of Adam ( the bias correction ) , validCount is the number of the valid samples of the batch ( the gradient is divided by it )
         struct GeneralData
         {
     #ifdef __cplusplus

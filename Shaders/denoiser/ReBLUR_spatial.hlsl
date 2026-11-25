@@ -1,11 +1,3 @@
-// ReBLUR spatial , one shader for the diffuse and for the indirect ( push.indirect ) , full size
-//
-// in  : tmpDiffuseImage ( .rgb the temporal result , .a the frame count ) , diffuseDistance / indirectDistance [ current ] ( the hit distance )
-// out : diffuseImage / indirectImage [ current ] ( the filtered result , it is also the history of the next frame )
-//       diffuseHistoryImage : .r ( diffuse ) or .g ( indirect ) = the frame count , the temporal pass of the next frame reads it
-//
-// the spatial pass only READS tmpDiffuseImage and only WRITES the images above , so the neighbour pixels never race
-
 static const float MAX_ACCUM_FRAMES = 32.0f;
 static const float MAX_RADIUS_PIXELS = 32.0f;
 static const float MAX_HIT_DISTANCE = 50.0f;
