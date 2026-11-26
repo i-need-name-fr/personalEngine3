@@ -291,6 +291,14 @@ struct GeneralInfo{
 #endif
 };
 
+struct BloomInfo
+{
+    float threhold;
+    float intensity;
+    float range;
+    float padding0;
+};
+
 // LEGACY
 struct LightSource{
 #ifdef __cplusplus
@@ -622,7 +630,7 @@ struct GeneralFeatures{
     // the multiplier of the sigma of the subsurface scattering of EVERY material ( ReSTIR SSS ) : 1 = the sigma of the material , the bigger the wider the scattering ( the debug : to see the effect on a scene of meters ) .
     // the two floats after it are the padding : the HLSL constant buffer is rounded to 16 bytes , the size of the C++ structure is now 28 words = 112 bytes , the same
     float sssScale;
-    float padding0;
+    uint32_t bloomRequired;
     float padding1;
 #else
 
@@ -668,7 +676,7 @@ struct GeneralFeatures{
     uint32_t SHaRC;
 
     float sssScale;
-    float padding0;
+    uint32_t bloomRequired;
     float padding1;
 #endif
 };

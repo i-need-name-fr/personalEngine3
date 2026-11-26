@@ -3,6 +3,7 @@
 #include "../moxNode/NodePass.hpp"
 #include "../moxSourceCluster/SceneImages.hpp"
 #include "../moxSourceCluster/SceneBuffers.hpp"
+#include "../moxSourceCluster/BloomSource.hpp"
 
 namespace mox
 {
@@ -63,7 +64,11 @@ namespace Passes
             shaders[0] = nullptr;
 
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
-
+            const auto features = requestFeatures();
+            if(features.bloomRequired)
+            {
+                translateBloom(cmd);
+            }
             return {};
         }
 
@@ -76,6 +81,8 @@ namespace Passes
 
         pShaderPipe2 pipe{nullptr};
         CreateInfo input{};
+        Source::BloomSource::FunctionType translateBloom{};
+        Source::SceneBuffers::RequestFeaturesFunctionType requestFeatures{};
 
         void processDelete() noexcept override
         {
@@ -112,6 +119,19 @@ namespace Passes
             catch(std::exception& e)
             {
                 MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create pipe for PostProcess");
+            }
+
+            {
+                const auto result = cSources[Source::BloomSource::Name].source->requestFunction<Source::BloomSource::FunctionType>(Source::BloomSource::FunctionName);
+                MOX_CHECK_RESULT(result)
+                translateBloom = result.value();
+            }
+
+            {
+                const auto result = cSources[Source::SceneBuffers::Name].source->requestFunction<Source::SceneBuffers::RequestFeaturesFunctionType>(Source::SceneBuffers::RequestFeaturesFunctionName);
+                MOX_CHECK_RESULT(result)
+
+                requestFeatures = result.value();
             }
 
             return {};

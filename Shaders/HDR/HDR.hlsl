@@ -3,6 +3,8 @@
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 #define MOX_SCENE_IMAGES_INCLUDED 1
 #include "../../include/moxSourceCluster/SceneImages.hlsl"
+#define MOX_BLOOM_SOURCE_INCLUDED 2
+#include "../../include/moxSourceCluster/BloomSource.hlsl"
 
 void writeColour(const uint2 pixel , const float4 colour)
 {
@@ -117,8 +119,9 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
     const float newEV = EVBuffer[0];
     const float exposure = exp2(newEV) * generalBuffer.exposure;      
     const float gamma = 2.2f;
-
-    const float3 hdr = HDRImage[id.xy].xyz * exposure;
+    float3 bloom = bloomImages[uint3(id.xy , 0)].xyz * (features.bloomRequired ? bloomBuffer.intensity : 0.0f);
+    if(any(!isfinite(bloom))) bloom = 0.0f;
+    const float3 hdr = (HDRImage[id.xy].xyz + bloom) * exposure;
     const float3 aces = ACESFilm(hdr);
 
     const float3 result = pow(aces , 1.0f / gamma);

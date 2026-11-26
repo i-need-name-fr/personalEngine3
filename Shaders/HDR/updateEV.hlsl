@@ -7,8 +7,8 @@ const static float adaptationLight = 3.0f;
 const static float adaptationNight = 1.5f;
 
 static const float MIDDLE_GRAY_EV = -2.474f;   // log2(0.18)
-static const float LOW_PERCENT  = 0.75f;
-static const float HIGH_PERCENT = 0.853f;
+static const float LOW_PERCENT  = 0.65f;
+static const float HIGH_PERCENT = 0.90f;
 
 static const float MAX_EV = 2.0f;
 static const float MIN_EV = -6.0f;

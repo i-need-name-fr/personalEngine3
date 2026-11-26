@@ -11,7 +11,7 @@
 #include "../moxSourceCluster/SharcHeap.hpp"
 #include "../moxSourceCluster/VolSource.hpp"
 #include "../moxObject/VertexHeap.hpp"
-
+#include "../moxSourceCluster/BloomSource.hpp"
 // all the passes
 #include "../GeneralPasses/Passes.hpp"
 #include "../moxObject/EntityForge.hpp"
@@ -40,6 +40,7 @@ namespace mox
             Source::pSharcHeap sharc{};
             Source::AI::pNeuralRadianceCache nrc{};
             Source::AI::pNKPD nkpd;
+            Source::pBloomSource bloom{};
         } sources;
 
 
@@ -283,6 +284,15 @@ namespace mox
                     {
                         sources.nkpd = std::make_shared<Source::AI::NKPD>(context.get());
                     }
+
+                    {
+                        Source::BloomSource::CreateInfo info{};
+                        info.context = context.get();
+                        info.upscal = "../Shaders/Bloom/Upsampler.hlsl";
+                        info.downscale = "../Shaders/Bloom/downSampler.hlsl";
+
+                        sources.bloom = std::make_shared<Source::BloomSource>(info);
+                    }
                 }
             }
             catch(std::exception &e)
@@ -437,7 +447,7 @@ namespace mox
                 {
                     SourceCluster* clusters[] = {
                         sources.buffers.get() , sources.images.get() , sources.atmo.get() , eForge->heap.get() , sources.textures.get() ,
-                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get() , sources.nrc.get() , sources.nkpd.get()
+                        sources.lights.get() , sources.restir.get() , sources.sharc.get() , sources.vol.get() , sources.nrc.get() , sources.nkpd.get() , sources.bloom.get()
                     };
 
                     for(SourceCluster* cluster : clusters)
@@ -786,6 +796,7 @@ namespace mox
             sources.vol->fogBuffer->updateBufferCmd(cmd ,fogData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.atmo->skyBuffer->updateBufferCmd(cmd ,skyData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.buffers->features->updateBufferCmd(cmd ,features , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
+            sources.bloom->bloomBuffer->updateBufferCmd(cmd , bloomData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
             eForge->update(cmd);
             skyManager->update(cmd);
@@ -827,6 +838,12 @@ namespace mox
             featureSettings.sssScale = 1.0f;
             featureSettings.NKPD = false;
             featureSettings.NKPDTrain = false;
+            featureSettings.bloomRequired = 1u;
+
+            bloomData = BloomInfo{};
+            bloomData.threhold = 1.0f;
+            bloomData.intensity = 0.3f;
+            bloomData.range = 0.7f;
 
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
@@ -897,6 +914,12 @@ namespace mox
 
             gui::Separator();
 
+            if(gui::CollapsingHeader("Bloom")){
+                drawSettingsForBloom(features , bloomData);
+            }
+
+            gui::Separator();
+
             applyNKPDRules(general , features);
 
             gui::End();
@@ -930,23 +953,12 @@ namespace mox
         }
 
         void drawSettingsForGeneralData(GeneralInfo &info) noexcept{
-            // exposure
-            // weights for direct and indirect
             namespace gui = ImGui;
 
             gui::Text("this settings are the basic, there is no really a big diff here");
             gui::Text("A general exposure , nothing really new");
             gui::SliderFloat("Exposure correction" , &info.exposure , 0.0f, 10.0f);
             gui::Separator();
-            // the proportion is the weight of the indirect light : it is kept in the data itself , so the slider does not go back to zero every frame
-            float prop = info.indirectWeight;
-            gui::Text("This propotion defines the proportion between direct and indirect");
-            if(gui::SliderFloat("Light Proportion" , &prop , 0.0f , 1.0f)){
-                info.directWeight = 1.0f - prop;
-                info.indirectWeight = prop;
-            }
-            gui::Separator();
-            // the green channel of the normal maps : OpenGL ( up ) or DirectX ( down ) . the raster and the RT shaders both read it
             bool normalMapOpenGL = info.normalMapOpenGL != 0u;
             if(gui::Checkbox("Normal maps are OpenGL style" , &normalMapOpenGL)){
                 info.normalMapOpenGL = normalMapOpenGL ? 1u : 0u;
@@ -961,6 +973,29 @@ namespace mox
             if(gui::Checkbox("Use ReLAX" , &lax)){
                 info.ReLAX = lax ? 1u : 0u;
             }
+        }
+
+        void drawSettingsForBloom(GeneralFeatures &features , BloomInfo &info) noexcept{
+            namespace gui = ImGui;
+
+            bool enabled = features.bloomRequired != 0u;
+            if(gui::Checkbox("Use Bloom" , &enabled)){
+                features.bloomRequired = enabled ? 1u : 0u;
+            }
+
+            if(!enabled) return;
+
+            gui::Separator();
+            gui::Text("threshold : the brightness ( HDR , before the exposure ) , only what is brighter glows");
+            gui::SliderFloat("Threshold" , &info.threhold , 0.0f , 10.0f , "%.2f" , ImGuiSliderFlags_Logarithmic);
+
+            gui::Separator();
+            gui::Text("intensity : how strong the glow is added to the picture");
+            gui::SliderFloat("bloom Intensity" , &info.intensity , 0.0f , 2.0f , "%.3f");
+
+            gui::Separator();
+            gui::Text("range : how much of the wide levels is kept ( 0 : a tight glow , 1 : a wide one )");
+            gui::SliderFloat("Range" , &info.range , 0.0f , 1.0f , "%.2f");
         }
 
         void drawSettingsForFog(FogVolume &info) noexcept{
@@ -1456,6 +1491,7 @@ namespace mox
         FogVolume fogSettings{};
         SkyViewData skySettings{};
         SunSource sunSettings{};
+        BloomInfo bloomData{};
         glm::vec3 fogTint{0.35f , 0.45f , 0.60f};
         float fogGlow{0.25f};
         uint32_t requiredMode = RasterizationRequired;

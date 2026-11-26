@@ -12,6 +12,9 @@
 #include "../../include/moxSourceCluster/IndirectPixels.hlsl"
 #define MOX_NKPD_INCLUDED 4
 #include "../../include/AI/NKPD/NKPD.hlsl"
+#define MOX_BLOOM_SOURCE_INCLUDED 5
+#include "../../include/moxSourceCluster/BloomSource.hlsl"
+
 
 static const float FOG_SKY_DISTANCE = 20000.0f;
 
@@ -114,6 +117,21 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
     return result;
 }
 
+void writeBloom(const uint2 pixel , float3 color)
+{
+    float lum = luminance(color);
+    const float maxLuminance = max(bloomBuffer.threhold * 8.0f , 8.0f);
+    if(lum > maxLuminance){
+        color *= maxLuminance / lum;
+        lum = maxLuminance;
+    }
+
+    const float knee = max(lum - bloomBuffer.threhold , 0.0f) / max(lum , 1e-4f);
+    const float3 bloomResult = color * knee * (features.bloomRequired ? 1.0f : 0.0f);
+
+    bloomImages[uint3(pixel , 0)] = float4(bloomResult , 1.0f);
+}
+
 [shader("compute")]
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID)
@@ -132,6 +150,7 @@ void main(uint3 id : SV_DispatchThreadID)
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
         HDRImage[id.xy] = float4(sky , diffuseImage[id.xy].w);
+        writeBloom(id.xy , sky);
         if(features.NKPD) diffuseHistoryImage[id.xy] = float4(0.0f , diffuseHistoryImage[id.xy].g , 0.0f , 0.0f);
         return ;
     }
@@ -162,12 +181,14 @@ void main(uint3 id : SV_DispatchThreadID)
 
     if(features.currentMode == INDIRECT_MODE){
         HDRImage[id.xy] = float4(indirectSignal , 1.0f);
+        writeBloom(id.xy , float3(0.0f , 0.0f , 0.0f));
         return;
     }
 
     if(features.currentMode == DEPTH_MODE)
     {
         HDRImage[id.xy] = float4(direct , 1.0f);
+        writeBloom(id.xy , float3(0.0f , 0.0f , 0.0f));
         return;
     }
 
@@ -176,4 +197,5 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     HDRImage[id.xy] = float4(result , 1.0f);
+    writeBloom(id.xy , result);
 }
