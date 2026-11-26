@@ -49,7 +49,7 @@ namespace Passes
             const auto result = bindBarrier(cmd , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             MOX_CHECK_RESULT(result)
 
-            static const std::uint32_t x = (context->sc->extent.width + 7) / 8;
+            static const std::uint32_t x = (context->sc->extent.width + 7) / 8;   // DLSSImage : the real size of the window
             static const std::uint32_t y = (context->sc->extent.height + 7) / 8;
 
             // now the shaders

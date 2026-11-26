@@ -136,7 +136,10 @@ namespace Source
         void _implTranslateBloom(VkCommandBuffer& cmd)
         {
             constexpr uint32_t levels = MOX_BLOOM_IMAGE_COUNT;
-            const VkExtent2D full = context->sc->extent;
+            // the bloom lives in the RENDER ( PostProcess writes the level 0 in the pixels of the render , HDR reads it by the pixel of the render ) : the pyramid is built over this size . with the size of the window
+            // the passes ran over the part of the layer that nobody rewrites ( outside of the render ) : the up pass adds into the level 0 in place , so that part grew every frame and leaked through the blur
+            // into the last ~40 pixels of the picture ( the white strip at the right and at the bottom )
+            const VkExtent2D full = context->getResolutionExtent();
 
             {
                 VkDescriptorBufferBindingInfoEXT info{};
@@ -266,7 +269,7 @@ namespace Source
                     info.viewType = VK_IMAGE_VIEW_TYPE_2D;
                     info.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
                     info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-                    info.extent = context->sc->extent;
+                    info.extent = context->getResolutionExtent();
                     info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;\
                     info.clear.float32[0] = 0.0f;
                     info.clear.float32[1] = 0.0f;

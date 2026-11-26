@@ -62,7 +62,7 @@ namespace Passes
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
 
             // the grid of the indirect light : read every frame ( the size of the window can change )
-            const VkExtent2D extent = Source::indirectExtent(inputData.context->sc->extent);
+            const VkExtent2D extent = Source::indirectExtent(inputData.context->getResolutionExtent());
             vkCmdDispatch(cmd , (extent.width + 7) / 8 , (extent.height + 7) / 8 , 1);
 
             shaders[0] = nullptr;

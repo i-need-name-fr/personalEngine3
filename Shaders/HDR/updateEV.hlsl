@@ -7,12 +7,6 @@ const static float adaptationLight = 1.0f;
 const static float adaptationNight = 0.5f;
 
 static const float MIDDLE_GRAY_EV = -2.474f;   // log2(0.18)
-static const float LOW_PERCENT  = 0.65f;
-static const float HIGH_PERCENT = 0.90f;
-
-static const float MAX_EV = 3.0f;
-static const float MIN_EV = -6.0f;
-
 // one thread , once per frame : 255 bins
 [shader("compute")]
 [numthreads(1 , 1 , 1)]
@@ -24,8 +18,8 @@ void main()
     const float currentEV = EVBuffer[0];
     const bool firstFrame = (EVBuffer[1] == 0.0f);
 
-    const float lowCount  = float(total) * LOW_PERCENT;
-    const float highCount = float(total) * HIGH_PERCENT;
+    const float lowCount  = float(total) * features.lowCount;
+    const float highCount = float(total) * features.highCount;    
 
     float running = 0.0f;
     float weightSum = 0.0f;
@@ -50,12 +44,12 @@ void main()
     if(!(countedPixel > 0.0f)) return;
 
     const float averageEV = weightSum / countedPixel;
-    const float targetEV = clamp(MIDDLE_GRAY_EV - averageEV , MIN_EV , MAX_EV);
+    const float targetEV = clamp(MIDDLE_GRAY_EV - averageEV , features.minEV , features.maxEV);
 
     float newEV;
     if(firstFrame)
     {
-        newEV = targetEV;            // первый кадр : прыгаем сразу
+        newEV = targetEV;          
         EVBuffer[1] = 1.0f;
     }
     else

@@ -31,6 +31,7 @@
 #include "HDR.hpp"
 #include "Volumentric.hpp"
 #include "PostProcess.hpp"
+#include "DLSSPass.hpp"
 #include "GUIPass.hpp"
 #include "NRCTrain.hpp"
 #include "NRCBack.hpp"

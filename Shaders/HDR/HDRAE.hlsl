@@ -19,9 +19,9 @@ uint32_t computeBit(const float3 radiance)
 void main(uint3 id : SV_DispatchThreadID)
 {
     uint32_t width , height;
-    HDRImage.GetDimensions(width , height);
+    DLSSImage.GetDimensions(width , height);
     uint2 size = uint2(width , height);
     if(any(id.xy >= size)) return;
-    const uint32_t bit = computeBit(HDRImage[id.xy].xyz);
+    const uint32_t bit = computeBit(DLSSImage[id.xy].xyz);
     InterlockedAdd(histoGram[bit] , 1);
 }

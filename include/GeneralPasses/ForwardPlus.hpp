@@ -67,8 +67,8 @@ namespace Passes
             MOX_CHECK_RESULT(result)
 
             // forward.hlsl : groupId.xy is the tile , so the grid is TILE_PER_ROW x rows . TILE_SIZE is the same as in LightHub ( ForwardPlusInfo::TILE_SIZE )
-            const std::uint32_t x = (inputData.context->sc->extent.width + TILE_SIZE - 1) / TILE_SIZE;
-            const std::uint32_t y = (inputData.context->sc->extent.height + TILE_SIZE - 1) / TILE_SIZE;
+            const std::uint32_t x = (inputData.context->getResolutionExtent().width + TILE_SIZE - 1) / TILE_SIZE;
+            const std::uint32_t y = (inputData.context->getResolutionExtent().height + TILE_SIZE - 1) / TILE_SIZE;
 
             // now the shaders
             VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};

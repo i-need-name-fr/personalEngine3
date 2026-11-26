@@ -1,12 +1,5 @@
-// ReBLUR temporal , one shader for the diffuse and for the indirect ( push.indirect ) , full size
-//
-// in  : diffuseImage / indirectImage [ current ] ( the raw signal ) , the same [ prev ] ( the filtered result of the last frame = the history )
-//       diffuseHistoryImage : .r = the frame count of the diffuse , .g = the frame count of the indirect ( written by the spatial pass of the last frame )
-// out : tmpDiffuseImage : .rgb = the accumulated signal , .a = the frame count of this frame ( the spatial pass reads it )
-//
-// no resource ( image ) is ever selected through a variable : SPIR-V can not do it , the PIXEL is selected in the functions below
-
 static const float MAX_ACCUM_FRAMES = 64.0f;
+static const float TRAIN_MAX_ACCUM_FRAMES = 512.0f;
 
 #include "../../include/ShaderStructures/ShaderStructure.h"
 #define MOX_SCENE_BUFFERS_INCLUDED 0
@@ -37,8 +30,6 @@ float readHistoryCount(uint2 p)
     return diffuseHistoryImage[p].r;
 }
 
-// the point of the last frame has to lie on the PLANE of the current surface : the distance to the plane is relative to the distance to the camera ( the error of the reprojection grows with it ) ,
-// 5 cm is the smallest allowed error ( the same as before for the near surfaces ) . the error ALONG the surface is not a reason to throw the history away
 static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
 static const float DISOCCLUSION_RELATIVE = 0.02f;
 
@@ -62,6 +53,14 @@ bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
 
     return true;
 }
+
+float relMSE(float3 a , float3 ref)
+{
+    const float3 d = a - ref;
+    const float l = luminance(ref);
+    return dot(d , d) / (l * l + 0.01f);   // знаменатель только от эталона
+}
+
 
 [shader("compute")]
 [numthreads(8, 8 , 1)]
@@ -97,6 +96,7 @@ void main(uint3 id : SV_DispatchThreadID){
 
     if(pixelCheck[gImageCoord] == SKYBOX_PIXEL){
         tmpDiffuseImage[id.xy] = float4(0.0f , 0.0f , 0.0f , 0.0f);
+        rawSignalImage[id.xy] = float4(0.0f , 0.0f , 0.0f , 0.0f);
         return;
     }
 
@@ -117,13 +117,34 @@ void main(uint3 id : SV_DispatchThreadID){
     float3 history = readHistory(prevCoord);
     bool valid = !(any(gPrevUV > float2(1.0f , 1.0f)) || any(gPrevUV < float2(0.0f , 0.0f))) && checkDisocclusion(gImageCoord , gPrevCoord);
 
+    const bool currentBad = any(!isfinite(currentSignal));
+    const bool historyBad = any(!isfinite(history)) || !isfinite(pCount) || pCount < 0.0f;
+    if(currentBad) currentSignal = historyBad ? float3(0.0f , 0.0f , 0.0f) : history;
+    if(historyBad) { history = currentSignal; pCount = 0.0f; }
+
     if(!valid){
         pCount = 0.0f;
         history = currentSignal;
     }
 
-    pCount = min(pCount + 1.0f , MAX_ACCUM_FRAMES);
+    float maxFrames = MAX_ACCUM_FRAMES;
+    float realCount;
+    if(features.NKPDTrain && generalBuffer.trainingIndex > 0u)
+    {
+        realCount = min(pCount + 1.0f , maxFrames);
+        maxFrames = max(TRAIN_MAX_ACCUM_FRAMES , generalBuffer.trainingIndex + 1u);
+        pCount = generalBuffer.trainingIndex;
+    }
+    else
+    {
+        pCount = min(pCount + 1.0f , maxFrames);
+        realCount = pCount;
+    }
+
     float alpha = 1.0f / pCount;
     float3 accumulated = lerp(history , currentSignal , alpha);
-    tmpDiffuseImage[id.xy] = float4(accumulated , pCount);
+    accumulated = clamp(accumulated , float3(0.0f , 0.0f , 0.0f) , float3(60000.0f , 60000.0f , 60000.0f));
+    currentSignal = clamp(currentSignal , float3(0.0f , 0.0f , 0.0f) , float3(60000.0f , 60000.0f , 60000.0f));
+    tmpDiffuseImage[id.xy] = float4(accumulated , realCount);
+    rawSignalImage[id.xy] = float4(currentSignal , 1.0f);
 }

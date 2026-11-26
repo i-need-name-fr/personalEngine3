@@ -177,10 +177,18 @@ namespace mox{
                         i++;
                     }
                 }
+
+                {
+                    const auto result = stream->setDLSS(sc->extent);
+                    if(!result.has_value()) return std::unexpected(result.error());
+                    optimalExtent = result.value();
+                    // DEBUG ( remove later ) : the size of the window ( the swapchain ) and the size of the render that DLSS asks for
+                    std::cout << "[extents] swapchain " << sc->extent.width << " x " << sc->extent.height << " , render ( DLSS ) " << optimalExtent.width << " x " << optimalExtent.height << "\n";
+                }
             }
             catch(std::exception& e){throw;}
 
-            SCREEN_MIP_COUNT = (uint32_t)(std::floor((float)std::log2(std::max(sc->extent.width , sc->extent.height)))) + 1ul;
+            SCREEN_MIP_COUNT = (uint32_t)(std::floor((float)std::log2(std::max(getResolutionExtent().width , getResolutionExtent().height)))) + 1ul;
 
             return {};
         }
@@ -269,6 +277,8 @@ namespace mox{
             step("done");
         }
 
+        VkExtent2D optimalExtent;
+
     public:
 
         struct CreateInfo{
@@ -309,6 +319,11 @@ namespace mox{
 
         std::vector<VkImage> images{};
         std::vector<VkImageView> views{};
+
+        VkExtent2D getResolutionExtent() const noexcept
+        {
+            return optimalExtent; // for now it will be swap chain , but function in reality will output the extent of DLSS
+        }
 
         [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> processQueueLoop(const QueueRecordTypeFunction &function) noexcept{
 
@@ -426,7 +441,7 @@ namespace mox{
 
         sl::Constants convertToConstants(const GeneralInfo& data) const noexcept
         {
-            const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
+            const float aspect = static_cast<float>(getResolutionExtent().width) / static_cast<float>(getResolutionExtent().height);
 
             sl::Constants slData{};
             slData.cameraFar = data.playerFar;
@@ -470,7 +485,7 @@ namespace mox{
             static bool firstIteration = true;
 
             GeneralInfo data = settings;
-            const float aspect = static_cast<float>(sc->extent.width) / static_cast<float>(sc->extent.height);
+            const float aspect = static_cast<float>(getResolutionExtent().width) / static_cast<float>(getResolutionExtent().height);
 
             // F freezes the camera of the CULLING ( userPos / userDir ) : it follows the player only while NOT fixed . it was inverted : the culling camera stayed at ( 0 , 0 , 0 ) with a zero direction
             if(!user->fixedPosition)
@@ -490,8 +505,8 @@ namespace mox{
             data.playerFar = cameraFar;
             data.dt = dt;
             data.frameIndex = sc->frameIndex;
-            data.screenWidth = sc->extent.width;
-            data.screenHeight = sc->extent.height;
+            data.resolutionWidth = getResolutionExtent().width;
+            data.resolutionHeight = getResolutionExtent().height;
             data.viewOnly = view;
             data.cullView = glm::lookAt(userPos , userPos + userDir , glm::vec3(0.0f , 1.0f , 0.0f));
             data.projOnly = proj;

@@ -75,7 +75,7 @@ bool tooSmall(const float4 c0 ,  const float4 c1 , const float4 c2)
     const float2 p1 = c1.xy / c1.w;
     const float2 p2 = c2.xy / c2.w;
 
-    const float2 texelSize = float2(float(generalBuffer.screenWidth) , float(generalBuffer.screenHeight));
+    const float2 texelSize = float2(float(generalBuffer.resolutionWidth) , float(generalBuffer.resolutionHeight));
 
     const float2 uv1 = (p0 * 0.5f + 0.5f) * texelSize;
     const float2 uv2 = (p1 * 0.5f + 0.5f) * texelSize;
@@ -105,7 +105,7 @@ bool cullTriangle(const float4 c0 , const float4 c1 , const float4 c2)
     if(c1.w < 0.0f) return false;
     if(c2.w < 0.0f) return false;
 
-    // if(tooSmall(c0 , c1 , c2)) return true;
+    if(tooSmall(c0 , c1 , c2)) return true;
 
     const float det =
         c0.x * (c1.y * c2.w - c2.y * c1.w)

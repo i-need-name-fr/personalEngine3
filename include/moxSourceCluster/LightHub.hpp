@@ -254,8 +254,8 @@ namespace Source
             ForwardPlusInfo data{};
             data.TILE_SIZE = 16;
 
-            uint32_t tilesX = (context->sc->extent.width  + data.TILE_SIZE - 1) / data.TILE_SIZE;
-            uint32_t tilesY = (context->sc->extent.height + data.TILE_SIZE - 1) / data.TILE_SIZE;
+            uint32_t tilesX = (context->getResolutionExtent().width  + data.TILE_SIZE - 1) / data.TILE_SIZE;
+            uint32_t tilesY = (context->getResolutionExtent().height + data.TILE_SIZE - 1) / data.TILE_SIZE;
 
             data.TILE_PER_ROW      = tilesX;
             data.TILE_TOTAL_AMOUNT = tilesX * tilesY;
@@ -422,8 +422,8 @@ namespace Source
                 ForwardPlusInfo data{};
                 data.TILE_SIZE = 16;
 
-                uint32_t tilesX = (context->sc->extent.width  + data.TILE_SIZE - 1) / data.TILE_SIZE;
-                uint32_t tilesY = (context->sc->extent.height + data.TILE_SIZE - 1) / data.TILE_SIZE;
+                uint32_t tilesX = (context->getResolutionExtent().width  + data.TILE_SIZE - 1) / data.TILE_SIZE;
+                uint32_t tilesY = (context->getResolutionExtent().height + data.TILE_SIZE - 1) / data.TILE_SIZE;
 
                 data.TILE_PER_ROW      = tilesX;
                 data.TILE_TOTAL_AMOUNT = tilesX * tilesY;

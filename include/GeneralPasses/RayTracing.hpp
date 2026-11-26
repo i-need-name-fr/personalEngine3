@@ -60,8 +60,8 @@ namespace Passes
             vkCmdBindPipeline(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->pipeline);
 
             // the extent is read every frame : after a resize of the swapchain the size of the dispatch has to follow it
-            const std::uint32_t width = std::max(1u , inputData.context->sc->extent.width);
-            const std::uint32_t height = std::max(1u , inputData.context->sc->extent.height);
+            const std::uint32_t width = std::max(1u , inputData.context->getResolutionExtent().width);
+            const std::uint32_t height = std::max(1u , inputData.context->getResolutionExtent().height);
 
             sbt->traceRays(cmd , width , height , 1);
 

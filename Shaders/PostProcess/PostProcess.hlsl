@@ -72,6 +72,8 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
     uint width , height , sliceCount , levels;
     txFogImageArray.GetDimensions(0 , width , height , sliceCount , levels);
 
+    const bool dust = features.dustMode != 0u;
+
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f , 0.0f , 0.0f);
 
@@ -92,7 +94,8 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
         const float blend = saturate(layerCoord - layerLow);
         float4 slice = lerp(txFogImageArray.SampleLevel(txSampler , float3(uv , layerLow) , 0) , txFogImageArray.SampleLevel(txSampler , float3(uv , layerHigh) , 0) , blend);
         if(any(isnan(slice)) || any(isinf(slice))) slice = float4(0.0f , 0.0f , 0.0f , 0.0f);
-        const float sigmaT = fogDensityAt(generalBuffer.playerPosition + rayDirection * (midDepth * rayScale));
+        const float3 samplePoint = generalBuffer.playerPosition + rayDirection * (midDepth * rayScale);
+        const float sigmaT = dust ? dustDensityAt(samplePoint) : fogDensityAt(samplePoint);
         const float3 scatter = slice.rgb;
 
         const float stepTransmittance = exp(-sigmaT * length);
@@ -102,9 +105,9 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
         transmittance *= stepTransmittance;
     }
 
-    float3 result = color * transmittance + scattered;
+    float3 result = dust ? (color + scattered) : (color * transmittance + scattered);
 
-    if(linearDepth > FOG_FAR){
+    if(!dust && linearDepth > FOG_FAR){
         const float3 origin = generalBuffer.playerPosition + rayDirection * (FOG_FAR * rayScale);
         const float rayLength = (linearDepth - FOG_FAR) * rayScale;
 
@@ -146,7 +149,7 @@ void main(uint3 id : SV_DispatchThreadID)
 
     if(pixelCheck[id.xy] == SKYBOX_PIXEL){
         float3 sky = diffuseImage[id.xy].xyz;
-        if(features.volumentricFog){
+        if(features.volumentricFog || features.dustMode){
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
         HDRImage[id.xy] = float4(sky , diffuseImage[id.xy].w);
@@ -192,7 +195,7 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    if(features.volumentricFog){
+    if(features.volumentricFog || features.dustMode){
         result = applyFog(result , linearDepth , worldDir , uv);
     }
 

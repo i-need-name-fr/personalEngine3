@@ -36,8 +36,8 @@ struct [raypayload] HitRayPayLoad{
 
 
 uint bufferIndex(uint2 pixel){
-    const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-    return clamped.x + clamped.y * generalBuffer.screenWidth;
+    const uint2 clamped = min(pixel , uint2(generalBuffer.resolutionWidth - 1u , generalBuffer.resolutionHeight - 1u));
+    return clamped.x + clamped.y * generalBuffer.resolutionWidth;
 }
 
 float3 ComputePixelRayDirection(uint2 pixelCoord, uint2 screenSize, float4x4 invViewProj , float3 playerPosition)
@@ -777,7 +777,7 @@ static const float MOTION_TOLERANCE = 8.0f;
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    const uint2 imageResolution = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const uint2 imageResolution = uint2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
     // one thread is one tile of MOX_SHARC_RESOLUTION_DIVISOR x MOX_SHARC_RESOLUTION_DIVISOR pixels ( rounded up : the tiles at the right and the bottom edge are not lost )
     const uint2 size = (imageResolution + (MOX_SHARC_RESOLUTION_DIVISOR - 1u)) / MOX_SHARC_RESOLUTION_DIVISOR;
     if(any(id.xy >= size)) return;

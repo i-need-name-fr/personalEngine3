@@ -131,7 +131,7 @@ namespace AI
                     hashGridInfoBuffer = std::make_shared<Buffer::DeviceReadableBuffer>(info, Buffer::translateToSpan(infos));
                 }
 
-                const VkExtent2D extent = {context->sc->extent.width / MOX_NRC_RESOLUTION_DIVISOR, context->sc->extent.height / MOX_NRC_RESOLUTION_DIVISOR};
+                const VkExtent2D extent = {context->getResolutionExtent().width / MOX_NRC_RESOLUTION_DIVISOR, context->getResolutionExtent().height / MOX_NRC_RESOLUTION_DIVISOR};
 
                 {
                     std::vector<::AI::NRC::TrainingSample> trainings(extent.width  * extent.height);

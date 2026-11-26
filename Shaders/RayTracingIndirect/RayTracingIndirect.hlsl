@@ -482,8 +482,8 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
 }
 
 uint bufferIndex(uint2 pixel){
-    const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-    return clamped.x + clamped.y * generalBuffer.screenWidth;
+    const uint2 clamped = min(pixel , uint2(generalBuffer.resolutionWidth - 1u , generalBuffer.resolutionHeight - 1u));
+    return clamped.x + clamped.y * generalBuffer.resolutionWidth;
 }
 
 void computeLight(GeneralObjectInfo info , float3 L , out float3 diffuse , out float3 specular){

@@ -59,12 +59,12 @@ namespace Passes
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
             viewport.x = 0.0f;
-            viewport.width = static_cast<float>(inputData.context->sc->extent.width);
-            viewport.y = static_cast<float>(inputData.context->sc->extent.height);
-            viewport.height = -static_cast<float>(inputData.context->sc->extent.height);
+            viewport.width = static_cast<float>(inputData.context->getResolutionExtent().width);
+            viewport.y = static_cast<float>(inputData.context->getResolutionExtent().height);
+            viewport.height = -static_cast<float>(inputData.context->getResolutionExtent().height);
 
             VkRect2D scissor{};
-            scissor.extent = {inputData.context->sc->extent.width , inputData.context->sc->extent.height};
+            scissor.extent = {inputData.context->getResolutionExtent().width , inputData.context->getResolutionExtent().height};
             scissor.offset = {0 , 0};
 
             vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
@@ -132,7 +132,7 @@ namespace Passes
                 info.layerCount = 1;
                 info.pDepthAttachment = &depthAtt;
                 info.pNext = nullptr;
-                info.renderArea.extent = {inputData.context->sc->extent.width , inputData.context->sc->extent.height};
+                info.renderArea.extent = {inputData.context->getResolutionExtent().width , inputData.context->getResolutionExtent().height};
                 info.renderArea.offset = {0 ,0};
 
                 vkCmdBeginRendering(cmd , &info);
@@ -248,7 +248,7 @@ namespace Passes
                     info.imageType = VK_IMAGE_TYPE_2D;
                     info.viewType = VK_IMAGE_VIEW_TYPE_2D;
                     info.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-                    info.extent = context->sc->extent;
+                    info.extent = context->getResolutionExtent();
                     info.layerCount = 1;
                     info.mipMapCount = 1;
                     info.imageUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;

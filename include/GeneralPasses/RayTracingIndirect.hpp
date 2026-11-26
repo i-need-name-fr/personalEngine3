@@ -54,7 +54,7 @@ namespace Passes
             MOX_CHECK_RESULT(result)
 
             // the indirect light has its own resolution : the same extent as indirectImage , read every frame ( the size of the window can change )
-            const VkExtent2D extent = Source::indirectExtent(inputData.context->sc->extent);
+            const VkExtent2D extent = Source::indirectExtent(inputData.context->getResolutionExtent());
             const std::uint32_t x = (extent.width + 7) / 8;
             const std::uint32_t y = (extent.height + 7) / 8;
 

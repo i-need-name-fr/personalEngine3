@@ -25,7 +25,7 @@ struct TileFrustum{
 };
 
 TileFrustum buildTileFrustum(uint2 tileCoord , uint2 tileSize , float4x4 invProj){
-    float2 screenSize = float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    float2 screenSize = float2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
 
     const float2 pixelMin = float2(tileCoord * tileSize);
     const float2 pixelMax = min(pixelMin + float2(tileSize) , screenSize);

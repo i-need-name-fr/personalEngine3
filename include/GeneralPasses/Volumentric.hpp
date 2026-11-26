@@ -45,7 +45,7 @@ namespace Passes
         virtual bool requestExecution() const noexcept override
         {
             const auto features = requestFeatures();
-            return features.volumentricFog != 0;
+            return features.volumentricFog != 0 || features.dustMode != 0;
         }
 
         virtual ErrorDataOutput<void> executePass(VkCommandBuffer &cmd) noexcept override

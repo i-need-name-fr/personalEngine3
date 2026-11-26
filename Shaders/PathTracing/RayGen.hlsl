@@ -74,8 +74,8 @@ typedef RayPayLoad_secondary_ RayPayLoadSecondary;
 // add here the NRC 
 
 uint bufferIndex(uint2 pixel){
-    const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-    return clamped.x + clamped.y * generalBuffer.screenWidth;
+    const uint2 clamped = min(pixel , uint2(generalBuffer.resolutionWidth - 1u , generalBuffer.resolutionHeight - 1u));
+    return clamped.x + clamped.y * generalBuffer.resolutionWidth;
 }
 
 float3 ComputePixelRayDirection(uint2 pixelCoord, uint2 screenSize, float4x4 invViewProj , float3 playerPosition)
@@ -191,7 +191,7 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     if(rayDir.y < 0.0f) return skyColor;
 
     // the angle of one pixel from the projection ( projOnly[1][1] is 1 / tan( fov / 2 ) )
-    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.screenHeight , 1u)));
+    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.resolutionHeight , 1u)));
     const float cosAngle = dot(rayDir , toSun);
     if(cosAngle < cos(SUN_ANGULAR_RADIUS + pixelAngle)) return skyColor;
 
@@ -735,7 +735,7 @@ struct [raypayload] RayPayLoad{
 };
 
 float2 skyMotionVector(const float3 dir , const uint2 pixel){
-    const float2 size = float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const float2 size = float2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
     const float2 uv = (float2(pixel) + 0.5f) / size;
     const float4 clip = mul(generalBuffer.prevViewProj , float4(dir , 0.0f));
     if(clip.w <= 1e-6f) return float2(0.0f , 0.0f);
@@ -843,7 +843,7 @@ void main()
         const float3 rayOrigin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
 
         const float2 motion = prevUV - uv;
-        const float motionDist = length(motion * float2(generalBuffer.screenWidth , generalBuffer.screenHeight));
+        const float motionDist = length(motion * float2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight));
         const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
 
         const float objectAmbient = pow(objectAOImage[pixel].x , features.AO_intens);

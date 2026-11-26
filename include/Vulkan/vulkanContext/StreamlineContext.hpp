@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sl.h>             // ядро: Preferences, slInit, slShutdown, ... (внутри уже тянет sl_consts.h, sl_core_api.h)
 #include <sl_helpers_vk.h>    // sl::VulkanInfo, slSetVulkanInfo (по мере надобности)
+#include <sl_helpers.h>       // sl::getResultAsStr и другие названия для логов
+#include <sl_dlss.h>          // DLSS Super Resolution: опции, оптимальные настройки, состояние
 #include <sl_dlss_g.h>        // Frame Generation: опции, состояние
 #include <sl_reflex.h>        // Reflex (сам включает sl_pcl.h)
 #include <sl_pcl.h>           // маркеры PCL
@@ -146,8 +148,8 @@ namespace mox
 
         void printRequirements() const noexcept
         {
-            const sl::Feature list[3] = {sl::kFeatureDLSS_G , sl::kFeatureReflex , sl::kFeaturePCL};
-            for(uint32_t i = 0 ; i < 3 ; i++)
+            const sl::Feature list[4] = {sl::kFeatureDLSS_G , sl::kFeatureReflex , sl::kFeaturePCL , sl::kFeatureDLSS};
+            for(uint32_t i = 0 ; i < 4 ; i++)
             {
                 const sl::FeatureRequirements& r = allRequirements[i];
                 const uint32_t flags = static_cast<uint32_t>(r.flags);
@@ -221,14 +223,14 @@ namespace mox
         [[nodiscard]] uint32_t extraGraphicsQueues() const noexcept
         {
             uint32_t sum = 0;
-            for(uint32_t i = 0 ; i < 3 ; i++) sum += allRequirements[i].vkNumGraphicsQueuesRequired;
+            for(uint32_t i = 0 ; i < 4 ; i++) sum += allRequirements[i].vkNumGraphicsQueuesRequired;
             return sum;
         }
 
         [[nodiscard]] uint32_t extraComputeQueues() const noexcept
         {
             uint32_t sum = 0;
-            for(uint32_t i = 0 ; i < 3 ; i++) sum += allRequirements[i].vkNumComputeQueuesRequired;
+            for(uint32_t i = 0 ; i < 4 ; i++) sum += allRequirements[i].vkNumComputeQueuesRequired;
             return sum;
         }
 
@@ -264,6 +266,18 @@ namespace mox
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to get the functions of the features of SL ( Reflex , PCL , DLSS_G )"});
             }
 
+            // DLSS Super Resolution : its own flag and not an error ( frame generation does not depend on it ) , the pointers stay nullptr and dlssReady is false
+            dlssReady = loadFeatureFunction(sl::kFeatureDLSS , "slDLSSSetOptions" , pDLSSSetOptions) &&
+                        loadFeatureFunction(sl::kFeatureDLSS , "slDLSSGetOptimalSettings" , pDLSSGetOptimalSettings) &&
+                        loadFeatureFunction(sl::kFeatureDLSS , "slDLSSGetState" , pDLSSGetState);
+            std::cout << "the functions of DLSS ( SetOptions , GetOptimalSettings , GetState ) : " << (dlssReady ? "loaded" : "NOT loaded") << "\n";
+            if(!dlssReady)
+            {
+                pDLSSSetOptions = nullptr;
+                pDLSSGetOptimalSettings = nullptr;
+                pDLSSGetState = nullptr;
+            }
+
             sl::ReflexOptions reflex{};
             reflex.mode = sl::ReflexMode::eLowLatency;
             const sl::Result reflexResult = pReflexSetOptions(reflex);
@@ -272,8 +286,59 @@ namespace mox
                 std::cout << "slReflexSetOptions failed , sl::Result = " << static_cast<uint32_t>(reflexResult) << "\n";
             }
 
+
             frameFunctionsReady = true;
             std::cout << "the frame functions of SL are ready\n";
+            return {};
+        }
+
+        ErrorDataOutput<VkExtent2D> setDLSS(VkExtent2D extent) noexcept
+        {
+            sl::DLSSOptions dlss{};
+            dlss.mode = sl::DLSSMode::eMaxQuality;
+            dlss.outputWidth  = extent.width;
+            dlss.outputHeight = extent.height;
+            dlss.colorBuffersHDR = sl::Boolean::eTrue;
+            dlss.preExposure = 1.0f;
+            dlss.exposureScale = 1.0f;
+            dlss.useAutoExposure = sl::Boolean::eFalse;
+
+            sl::DLSSOptimalSettings settings{};
+            const sl::Result optimal = pDLSSGetOptimalSettings(dlss , settings);
+            if(optimal != sl::Result::eOk)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to get optimal settings for DLSS , error ID -> {}" , static_cast<int32_t>(optimal))});
+            }
+
+            const sl::Result result = pDLSSSetOptions(sl::ViewportHandle(0) , dlss);
+            if(result != sl::Result::eOk)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to set options for DLSS , error ID -> {}" , static_cast<int32_t>(result))});
+            }
+
+            return VkExtent2D{settings.optimalRenderWidth , settings.optimalRenderHeight};
+        }
+
+        // DLSS can be used : the plugin is loaded and its functions are found ( setDLSS is called by the context )
+        [[nodiscard]] bool isDLSSReady() const noexcept
+        {
+            return dlssReady && pEvaluateFeature != nullptr;
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> evaluateDLSS(VkCommandBuffer cmd) noexcept
+        {
+            if(!isDLSSReady() || !currentFrame)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to evaluate DLSS , since it is not ready or there is no frame token"});
+            }
+
+            const sl::ViewportHandle viewport(0);
+            const sl::BaseStructure* inputs[] = {&viewport};
+            const sl::Result result = pEvaluateFeature(sl::kFeatureDLSS , *currentFrame , inputs , 1 , reinterpret_cast<sl::CommandBuffer*>(cmd));
+            if(result != sl::Result::eOk)
+            {
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to evaluate DLSS , error -> {} ( {} )" , sl::getResultAsStr(result) , static_cast<int32_t>(result))});
+            }
             return {};
         }
 
@@ -344,6 +409,12 @@ namespace mox
         PFun_slPCLSetMarker* pPCLSetMarker = std::nullptr_t();
         PFun_slDLSSGSetOptions* pDLSSGSetOptions = std::nullptr_t();
         PFun_slDLSSGGetState* pDLSSGGetState = std::nullptr_t();
+        // DLSS Super Resolution : the options , the size of the render for a mode , the state ( the memory that DLSS uses , is it ready )
+        PFun_slDLSSSetOptions* pDLSSSetOptions = std::nullptr_t();
+        PFun_slDLSSGetOptimalSettings* pDLSSGetOptimalSettings = std::nullptr_t();
+        PFun_slDLSSGetState* pDLSSGetState = std::nullptr_t();
+        // the core function that runs a feature on a command buffer ( DLSS Super Resolution here ) : it is in the interposer , like slSetConstants
+        PFun_slEvaluateFeature* pEvaluateFeature = std::nullptr_t();
 
         sl::FrameToken* currentFrame = nullptr;
         PFun_slShutdown* pShutdown = std::nullptr_t();
@@ -355,6 +426,7 @@ namespace mox
 
         bool slInitialized = false;
         bool frameFunctionsReady = false;
+        bool dlssReady = false;
 
         template<typename Function>
         [[nodiscard]] bool loadSlFunction(Function*& function , const char* name) noexcept
@@ -375,13 +447,15 @@ namespace mox
 
         std::wstring pluginsFolder;
         const wchar_t* pluginPaths[1]{};
-        sl::Feature features[3]{};
+        sl::Feature features[4]{};
         sl::FeatureRequirements requirements{};
-        // the answers for features[0] ( DLSS_G ) , features[1] ( Reflex ) , features[2] ( PCL ) . the pointers inside ( extension names , tags ) belong to the DLL of SL and live until slShutdown
-        sl::FeatureRequirements allRequirements[3]{};
+        // the answers for features[0] ( DLSS_G ) , features[1] ( Reflex ) , features[2] ( PCL ) , features[3] ( DLSS ) . the pointers inside ( extension names , tags ) belong to the DLL of SL and live until slShutdown .
+        // the size has to be the same as the number of the features : the loops go over all of them , with 3 here the 4th answer was written behind the array and SL refused the broken structure ( sl::Result 24 )
+        sl::FeatureRequirements allRequirements[4]{};
 
         static const char* featureName(const sl::Feature feature) noexcept
         {
+            if(feature == sl::kFeatureDLSS)   return "DLSS";
             if(feature == sl::kFeatureDLSS_G) return "DLSS_G";
             if(feature == sl::kFeatureReflex) return "Reflex";
             if(feature == sl::kFeaturePCL)    return "PCL";
@@ -451,6 +525,11 @@ namespace mox
             pPCLSetMarker = nullptr;
             pDLSSGSetOptions = nullptr;
             pDLSSGGetState = nullptr;
+            pDLSSSetOptions = nullptr;
+            pDLSSGetOptimalSettings = nullptr;
+            pDLSSGetState = nullptr;
+            pEvaluateFeature = nullptr;
+            dlssReady = false;
         }
 
         void processCopy(StreamlineContext&& input) noexcept
@@ -460,11 +539,7 @@ namespace mox
 
         [[nodiscard]] ErrorDataOutput<void> _implProcessInit(const CreateInfo& input) noexcept
         {
-            // DEBUG ( remove later ) : every output goes out at once , so a crash does not eat the last lines of the console
-            std::cout << std::unitbuf;
-
             const std::wstring path = input.folder.empty() ? PATH : input.folder + L"\\sl.interposer.dll";
-
             module = LoadLibraryW(path.c_str());
             if(!module)
             {
@@ -513,9 +588,9 @@ namespace mox
             }
 
             if(!loadSlFunction(pGetNewFrameToken , "slGetNewFrameToken") || !loadSlFunction(pGetFeatureFunction , "slGetFeatureFunction") ||
-               !loadSlFunction(pSetConstants , "slSetConstants") || !loadSlFunction(pSetTagForFrame , "slSetTagForFrame"))
+               !loadSlFunction(pSetConstants , "slSetConstants") || !loadSlFunction(pSetTagForFrame , "slSetTagForFrame") || !loadSlFunction(pEvaluateFeature , "slEvaluateFeature"))
             {
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to load the frame functions of SL ( slGetNewFrameToken , slGetFeatureFunction , slSetConstants , slSetTagForFrame )"});
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to load the frame functions of SL ( slGetNewFrameToken , slGetFeatureFunction , slSetConstants , slSetTagForFrame , slEvaluateFeature )"});
             }
 
             const auto initResult = _implProcessSlInit();
@@ -537,6 +612,7 @@ namespace mox
             features[0] = sl::kFeatureDLSS_G;
             features[1] = sl::kFeatureReflex;
             features[2] = sl::kFeaturePCL;
+            features[3] = sl::kFeatureDLSS;
             pluginPaths[0] = pluginsFolder.c_str();
 
             sl::Preferences prefs{};
@@ -547,7 +623,7 @@ namespace mox
             prefs.pathToLogsAndData = LOGS.c_str();
             prefs.logMessageCallback = &logCallback;
             prefs.featuresToLoad = features;
-            prefs.numFeaturesToLoad = 3;
+            prefs.numFeaturesToLoad = 4;
             prefs.engine = sl::EngineType::eCustom;
             prefs.engineVersion = "1.0";
             prefs.projectId = "5b7f0c3e-8a21-4c6d-9d1e-2f4a6b8c0d12";
@@ -566,7 +642,7 @@ namespace mox
             slInitialized = true;
             std::cout << "slInit ok\n";
             // the requirements of EVERY feature that was loaded : each one can ask for its own extensions and queues , the results are added together
-            for(uint32_t i = 0 ; i < 3 ; i++)
+            for(uint32_t i = 0 ; i < 4 ; i++)
             {
                 const sl::Result result = getFeatureRequirements(features[i] , allRequirements[i]);
                 if(result != sl::Result::eOk)

@@ -111,9 +111,13 @@ namespace Source
 
         // temporary images for the passes ( denoisers and so on ) , one image each , no ping pong
         Image::pRenderImage2 tmpDiffuseImage;
+        // the RAW signal of the frame ( the diffuse , then the indirect : the same order as tmpDiffuseImage ) : the temporal pass of ReBLUR copies it before it accumulates , the input of the NKPD training
+        Image::pRenderImage2 rawSignalImage;
         Image::pRenderImage2 tmpSpecularImage;
         Image::pRenderImage2 diffuseHistoryImage;
         Image::pRenderImage2 specularHistoryImage;
+
+        Image::pRenderImage2 DLSSImage{};
 
         Image::pMultiViewImage2<8 , Image::ViewPerType::Mip> HiZImage{nullptr};
 
@@ -204,6 +208,7 @@ namespace Source
         {
             viewImage = nullptr;
             tmpDiffuseImage = nullptr;
+            rawSignalImage = nullptr;
             tmpSpecularImage = nullptr;
             diffuseHistoryImage = nullptr;
             specularHistoryImage = nullptr;
@@ -221,6 +226,7 @@ namespace Source
             HiZImage = nullptr;
             HiZTranslate = nullptr;
             HiZGenerate = nullptr;
+            DLSSImage = nullptr;
             MultiScatterRoughness = nullptr;
             for(const auto& id : { 0 ,1})
             {
@@ -259,7 +265,7 @@ namespace Source
                 info.clear.float32[3] = 0.0f;
                 info.layerCount = 1;
                 info.mipMapCount = 1;
-                info.extent = context->sc->extent;
+                info.extent = context->getResolutionExtent();
                 info.imageType = VK_IMAGE_TYPE_2D;
 
                 // all colored images except for final image / guiImage
@@ -277,12 +283,19 @@ namespace Source
 
                 albedoImage = std::make_shared<Image::RenderImage2>(info);
                 tmpDiffuseImage = std::make_shared<Image::RenderImage2>(info);
+                rawSignalImage = std::make_shared<Image::RenderImage2>(info);
                 tmpSpecularImage = std::make_shared<Image::RenderImage2>(info);
                 diffuseHistoryImage = std::make_shared<Image::RenderImage2>(info);
                 specularHistoryImage = std::make_shared<Image::RenderImage2>(info);
 
                 HDRImage[0] = std::make_shared<Image::RenderImage2>(info);
                 HDRImage[1] = std::make_shared<Image::RenderImage2>(info);
+
+
+                info.extent = context->sc->extent; // the real extent 
+                DLSSImage = std::make_shared<Image::RenderImage2>(info);
+                // the other images are of the RESOLUTION of the render , not of the output
+                info.extent = context->getResolutionExtent();
 
                 // indirect has its own resolution : the extent of the screen / MOX_INDIRECT_DIVISOR_RESOLUTION
                 const VkExtent2D fullExtent = info.extent;
@@ -293,9 +306,15 @@ namespace Source
                 
                 info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
+                // the picture that goes to the window and the UI over it : the REAL size of the window ( DLSS makes it from the render ) , not the size of the render
+                info.extent = context->sc->extent;
                 guiCleanImage = std::make_shared<Image::RenderImage2>(info);
                 finalImage = std::make_shared<Image::RenderImage2>(info);
                 guiImage = std::make_shared<Image::RenderImage2>(info);
+                // DEBUG ( remove later ) : the sizes of the images of the output and of the render
+                std::cout << "[extents] DLSSImage " << DLSSImage->extent.width << " x " << DLSSImage->extent.height << " , finalImage " << finalImage->extent.width << " x " << finalImage->extent.height
+                          << " , render images " << fullExtent.width << " x " << fullExtent.height << "\n";
+                info.extent = fullExtent;
 
                 info.imageFormat = VK_FORMAT_R16G16_SFLOAT;
                 motionVector = std::make_shared<Image::RenderImage2>(info);
@@ -315,7 +334,7 @@ namespace Source
                 info.extent = indirectExtent(info.extent);
                 indirectDistance[0] = std::make_shared<Image::RenderImage2>(info);
                 indirectDistance[1] = std::make_shared<Image::RenderImage2>(info);
-                info.extent = context->sc->extent;
+                info.extent = context->getResolutionExtent();
                 roughnessImage = std::make_shared<Image::RenderImage2>(info);
                 metallicImage = std::make_shared<Image::RenderImage2>(info);
                 pixelCheck = std::make_shared<Image::RenderImage2>(info);
@@ -346,7 +365,7 @@ namespace Source
                     info.clear.float32[1] = 1.0f;
                     info.clear.float32[2] = 1.0f;
                     info.clear.float32[3] = 1.0f;
-                    info.extent = context->sc->extent;
+                    info.extent = context->getResolutionExtent();
                     info.imageFormat = VK_FORMAT_R32_SFLOAT;
 
                     HiZImage = std::make_shared<Image::MultiViewImage2<8 , Image::ViewPerType::Mip>>(info);
@@ -498,6 +517,11 @@ namespace Source
                 }
 
                 {
+                    const auto result = _implAddSource(rawSignalImage.get() , "rawSignalImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
                     const auto result = _implAddSource(tmpSpecularImage.get() , "tmpSpecularImage");
                     if(!result.has_value()) return result;
                 }
@@ -509,6 +533,11 @@ namespace Source
 
                 {
                     const auto result = _implAddSource(specularHistoryImage.get() , "specularHistoryImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
+                    const auto result = _implAddSource(DLSSImage.get() , "DLSSImage");
                     if(!result.has_value()) return result;
                 }
 
@@ -562,7 +591,7 @@ namespace Source
                 dbuffers.resize(2);
                 for(const auto& id : {0 , 1})
                 {
-                    std::vector<DescriptorData2> data(42);
+                    std::vector<DescriptorData2> data(44);
                     data[0] = DescriptorData2::createData(positionImage[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                     data[1] = DescriptorData2::createData(positionImage[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
 
@@ -620,6 +649,9 @@ namespace Source
                     data[39] = DescriptorData2::createData(tmpSpecularImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 39 , 0);
                     data[40] = DescriptorData2::createData(diffuseHistoryImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 40 , 0);
                     data[41] = DescriptorData2::createData(specularHistoryImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 41 , 0);
+                    // the output of DLSS ( the real resolution of the window ) , one image , no ping pong
+                    data[42] = DescriptorData2::createData(DLSSImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 42 , 0);
+                    data[43] = DescriptorData2::createData(rawSignalImage.get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 43 , 0);
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -640,7 +672,7 @@ namespace Source
         {
             try
             {
-                std::vector<DescriptorLayoutData> data(42);
+                std::vector<DescriptorLayoutData> data(44);
                 for(auto& d : data)
                 {
                     d = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , .count = 1};

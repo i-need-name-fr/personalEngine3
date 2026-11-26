@@ -62,7 +62,7 @@ namespace Passes
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
 
             // the samples of the training are the tiles of the grid of the signal : the full resolution for the diffuse , the resolution of indirectImage for the indirect light ( read every frame )
-            const VkExtent2D gridExtent = forIndirect ? Source::indirectExtent(inputData.context->sc->extent) : inputData.context->sc->extent;
+            const VkExtent2D gridExtent = forIndirect ? Source::indirectExtent(inputData.context->getResolutionExtent()) : inputData.context->getResolutionExtent();
             const std::uint32_t x = ( gridExtent.width / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
             const std::uint32_t y = ( gridExtent.height / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
             const uint32_t push = forIndirect ? 1 : 0 ;

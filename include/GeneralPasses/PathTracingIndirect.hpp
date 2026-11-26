@@ -63,7 +63,7 @@ namespace Passes
             vkCmdBindPipeline(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->pipeline);
 
             // the indirect light has its own resolution ( the extent of the screen / MOX_INDIRECT_DIVISOR_RESOLUTION ) . the extent is read every frame : after a resize of the swapchain the size of the dispatch has to follow it
-            const VkExtent2D extent = Source::indirectExtent(inputData.context->sc->extent);
+            const VkExtent2D extent = Source::indirectExtent(inputData.context->getResolutionExtent());
             const std::uint32_t width = extent.width;
             const std::uint32_t height = extent.height;
 

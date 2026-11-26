@@ -58,8 +58,8 @@ namespace Passes
             const auto result = bindBarrier(cmd , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             MOX_CHECK_RESULT(result)
 
-            static const std::uint32_t x = ( input.context->sc->extent.width + 7) / 8;
-            static const std::uint32_t y = ( input.context->sc->extent.height + 7) / 8;
+            static const std::uint32_t x = ( input.context->getResolutionExtent().width + 7) / 8;
+            static const std::uint32_t y = ( input.context->getResolutionExtent().height + 7) / 8;
 
             // now the shaders
             VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};
@@ -70,15 +70,15 @@ namespace Passes
             vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(std::uint32_t) , &value);
             if(value)
             {
-                static const VkExtent2D extent = Source::indirectExtent(context->sc->extent);
+                static const VkExtent2D extent = Source::indirectExtent(context->getResolutionExtent());
                 static const std::uint32_t x = ( extent.width + 7) / 8;
                 static const std::uint32_t y = ( extent.height + 7) / 8;
                 vkCmdDispatch(cmd , x , y , 1);
             }
             else
             {
-                static const std::uint32_t x = ( input.context->sc->extent.width + 7) / 8;
-                static const std::uint32_t y = ( input.context->sc->extent.height + 7) / 8;
+                static const std::uint32_t x = ( input.context->getResolutionExtent().width + 7) / 8;
+                static const std::uint32_t y = ( input.context->getResolutionExtent().height + 7) / 8;
                 vkCmdDispatch(cmd , x , y , 1);
             }
             shaders[0] = nullptr;

@@ -105,7 +105,7 @@ void main(uint3 id : SV_DispatchThreadID)
 {
     uint width , height , tempDepth;
     RWFogImageArray.GetDimensions(width , height , tempDepth);
-    uint2 screenSize = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    uint2 screenSize = uint2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
     uint3 fogSize = uint3(width , height , tempDepth);
     if(any(id >= fogSize)) return;
 
@@ -113,11 +113,13 @@ void main(uint3 id : SV_DispatchThreadID)
 
     const float3 jitter = froxelNoise(id , generalBuffer.frameIndex);
     float3 pos = froxelWorldPos(id , fogSize , jitter);
-    float density = fogDensityAt(pos);
+    // the DUST ( features.dustMode ) : no fog , only the light of the sun and the lamps in the air . the density is the dust , the scattering is white ( no albedo of the fog ) , the phase is its own
+    const bool dust = features.dustMode != 0u;
+    float density = dust ? dustDensityAt(pos) : fogDensityAt(pos);
     float sigmaT = density;
-    float3 sigmaS = sigmaT * fogBuffer.albedo;
+    float3 sigmaS = dust ? float3(sigmaT , sigmaT , sigmaT) : sigmaT * fogBuffer.albedo;
 
-    const float g = fogBuffer.g;
+    const float g = dust ? fogBuffer.dustG : fogBuffer.g;
 
     float3 V = normalize(pos - generalBuffer.playerPosition);
     float3 L_sun = -sunBuffer.direction;
@@ -148,7 +150,7 @@ void main(uint3 id : SV_DispatchThreadID)
             vis = 0.0f;
         }
     }
-    float3 Lin = sunBuffer.diffuse  * phaseHG(dot(L_sun , V) , g) * vis;
+    float3 Lin = sunBuffer.diffuse  * phaseHG(dot(L_sun , V) , g) * vis * fogBuffer.dustIntensity;
 
     uint lightCount;
     uint lightIndices[lg::MAX_LIGHT_PER_CELL];
@@ -172,12 +174,16 @@ void main(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    const float SKY_VISIBLE_RANGE = 100.0f;
-    const float SKY_VISIBLE_MIN = 0.1f;
-    const float3 skyDirection = sampleCone(float3(0.0f , 1.0f , 0.0f) , 0.0f , seed);
-    const float skyVisible = lerp(SKY_VISIBLE_MIN , 1.0f , calculateShadows(pos , skyDirection , SKY_VISIBLE_RANGE));
-
-    const float3 scattered = Lin + fogBuffer.color * skyVisible;
+    // the glow of the sky is the fog ( the milk of the air ) : the dust has none , only the shafts
+    float3 scattered = Lin * fogBuffer.dustIntensity;
+    if(!dust)
+    {
+        const float SKY_VISIBLE_RANGE = 100.0f;
+        const float SKY_VISIBLE_MIN = 0.1f;
+        const float3 skyDirection = sampleCone(float3(0.0f , 1.0f , 0.0f) , 0.0f , seed);
+        const float skyVisible = lerp(SKY_VISIBLE_MIN , 1.0f , calculateShadows(pos , skyDirection , SKY_VISIBLE_RANGE));
+        scattered = Lin + fogBuffer.color * skyVisible;
+    }
     float3 froxel = scattered * sigmaS;
     if(any(isnan(froxel)) || any(isinf(froxel))) froxel = float3(0.0f , 0.0f , 0.0f);
 

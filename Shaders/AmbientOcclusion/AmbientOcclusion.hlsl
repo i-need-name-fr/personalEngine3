@@ -21,7 +21,7 @@ bool isSkyPixel(uint2 coord){
 // bumps of the stone tilt it by up to 40 degrees , and a flat floor looked like it was covered by its own bricks ( the AO showed the
 // pattern of the texture ) . the closer neighbour is taken on each axis , so an edge of an object does not bend the normal
 float3 geometricNormal(uint2 coord , float3 P , float3 fallback){
-    const uint2 maxCoord = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight) - 1u;
+    const uint2 maxCoord = uint2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight) - 1u;
 
     const uint2 right = uint2(min(coord.x + 1u , maxCoord.x) , coord.y);
     const uint2 left = uint2(coord.x - (coord.x > 0u ? 1u : 0u) , coord.y);
@@ -57,7 +57,7 @@ float3 geometricNormal(uint2 coord , float3 P , float3 fallback){
 //   -- it did not flip y when going from the clip space to the pixel , the engine does ( see the viewport )
 float computeSSAO(uint2 currentPixel , float3 viewPos , float3 viewNormal , float radius , uint iteration){
     const uint iterations = max(min(iteration , 64u) , 1u);
-    const uint2 screenSize = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const uint2 screenSize = uint2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
 
     // the kernel is turned around the normal by an angle that depends on the pixel
     const float angle = pixelDither(currentPixel) * 2.0f * PI;
@@ -104,11 +104,11 @@ float computeSSAO(uint2 currentPixel , float3 viewPos , float3 viewNormal , floa
 float computeHBAO(uint2 currentPixel , float3 P , float3 N , float3 viewPos , float radius , uint iteration){
     const uint directions = max(min(iteration , 64u) , 1u);
     const uint steps = 6u;
-    const int2 screenSize = int2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const int2 screenSize = int2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
 
     // the radius of the world in pixels at the distance of this pixel
     const float viewDepth = max(-viewPos.z , 1e-3f);
-    const float pixelsPerUnit = 0.5f * float(generalBuffer.screenHeight) * generalBuffer.projOnly[1][1] / viewDepth;
+    const float pixelsPerUnit = 0.5f * float(generalBuffer.resolutionHeight) * generalBuffer.projOnly[1][1] / viewDepth;
     const float radiusPixels = clamp(radius * pixelsPerUnit , 4.0f , 160.0f);
 
     const float dither = pixelDither(currentPixel);

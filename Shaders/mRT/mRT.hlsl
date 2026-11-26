@@ -59,7 +59,7 @@ float2 calculateParallaxAtHit(const float2 currentUV , const float3 V , const in
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    const uint2 size = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const uint2 size = uint2(generalBuffer.resolutionWidth , generalBuffer.resolutionHeight);
     if(any(id.xy >= size)) return;
     const uint2 pixel = id.xy;
 

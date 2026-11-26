@@ -63,7 +63,8 @@ namespace mox{
         VK_NV_LOW_LATENCY_EXTENSION_NAME,
         // the two of Windows are written as text : their macros exist only when VK_USE_PLATFORM_WIN32_KHR is defined before vulkan.h
         "VK_KHR_external_memory_win32",
-        "VK_KHR_external_semaphore_win32"
+        "VK_KHR_external_semaphore_win32",
+        "VK_EXT_buffer_device_address"
     };
 
 

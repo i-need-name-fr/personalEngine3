@@ -20,7 +20,7 @@ static const float LOBE_VOLUME = 0.5f;
 float ComputeBlurRadius(float roughness , float hitDistance , float viewDistance , float historyCount) {
     const float alpha = roughness * roughness;
     const float tanHalfAngle = alpha * LOBE_VOLUME / max(1.0f - LOBE_VOLUME , 1e-4f);
-    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.screenHeight , 1u)));
+    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.resolutionHeight , 1u)));
     const float spotShare = hitDistance / max(viewDistance + hitDistance , 1e-4f);
     const float baseRadius = tanHalfAngle * spotShare / max(pixelAngle , 1e-6f);
     const float historyFactor = saturate(1.0 - historyCount / MAX_ACCUM_FRAMES);

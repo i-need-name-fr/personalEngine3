@@ -59,6 +59,13 @@ float NormalizeHitDistance(float hitDistance, float viewZ, float roughness) {
     return hitDistance / max(scale, 1e-4);
 }
 
+float relMSE(float3 a , float3 ref)
+{
+    const float3 d = a - ref;
+    const float l = luminance(ref);
+    return dot(d , d) / (l * l + 0.01f);   // знаменатель только от эталона
+}
+
 [shader("compute")]
 [numthreads(8, 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID){
@@ -94,8 +101,6 @@ void main(uint3 id : SV_DispatchThreadID){
 
     hitDistance = min(hitDistance , MAX_HIT_DISTANCE);
 
-    // MAX_RADIUS_PIXELS was only a factor : a big normalized distance gave a radius of hundreds of pixels
-    // the radius is in the pixels of the full resolution , the offsets are in the pixels of THIS image : the indirect pixel is wider
     float radius = min(ComputeBlurRadius(NormalizeHitDistance(hitDistance , depthImage[gCenter] , 0) , historyCount ) , MAX_RADIUS_PIXELS) * resolutionScale;
 
     float3 centerNormal = normalImage[gCenter].xyz;
@@ -124,6 +129,13 @@ void main(uint3 id : SV_DispatchThreadID){
         sum += tmpDiffuseImage[samplePos].xyz * w;
         weight += w;
     }
+    
+    float3 result = sum / weight;
+    if(features.NKPDTrain)
+    {
+        // result = lerp(center , result , saturate(relMSE(result , center)));
+        result = center;
+    }
 
-    writeResult(id.xy , sum / weight , historyCount);
+    writeResult(id.xy , result , historyCount);
 }

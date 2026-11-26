@@ -92,4 +92,10 @@
 [[vk::binding( 40   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> diffuseHistoryImage;
 [[vk::image_format("rgba16f")]]
 [[vk::binding( 41   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> specularHistoryImage;
+
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 42   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> DLSSImage;
+
+[[vk::image_format("rgba16f")]]
+[[vk::binding( 43   ,   MOX_SCENE_IMAGES_INCLUDED   )]] RWTexture2D<float4> rawSignalImage;
 #endif

@@ -8,21 +8,6 @@ namespace mox
 {
 namespace Source
 {
-    /*
-
-    SceneReSTIR.hlsl ( MOX_RESTIR_INCLUDED is the index of the set ) :
-
-    [[vk::binding(0 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;       the reservoirs that THIS frame writes
-    [[vk::binding(1 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;   the reservoirs of the previous frame
-    [[vk::binding(2 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> ReSTIRPTBuffer;
-    [[vk::binding(3 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirPT> prevReSTIRPTBuffer;
-    [[vk::binding(4 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> ReSTIRSSBuffer;       ReSTIR SSS ( the subsurface scattering )
-    [[vk::binding(5 , MOX_RESTIR_INCLUDED)]] RWStructuredBuffer<ReservoirSS> prevReSTIRSSBuffer;
-
-    ping pong : the pair is [0] and [1] , the descriptor buffer number id ( = frameIndex % 2 ) has the buffer [id] as the "next" one and [!id] as the "prev" one ,
-    the same rule as moxPingPongIndex . the sources are ReSTIRGIBuffer_0 , ReSTIRGIBuffer_1 , ReSTIRPTBuffer_0 , ReSTIRPTBuffer_1 , ReSTIRSSBuffer_0 , ReSTIRSSBuffer_1 ( the name of the .mox file + _0 or _1 )
-
-    */
 
     class SceneReSTIR final : public SourceCluster
     {
@@ -97,8 +82,8 @@ namespace Source
             {
                 // GI and PT : the same extent as indirectImage of SceneImages ( at least 1 pixel ) . SS ( the subsurface scattering ) is a part of the DIRECT light : its reservoirs are indexed by the pixel of the
                 // full resolution ( bufferIndex ( pixel ) of RayGen ) , so they keep the extent of the screen
-                extent = indirectExtent(context->sc->extent);
-                const VkExtent2D fullExtent = {std::max(1u , context->sc->extent.width) , std::max(1u , context->sc->extent.height)};
+                extent = indirectExtent(context->getResolutionExtent());
+                const VkExtent2D fullExtent = {std::max(1u , context->getResolutionExtent().width) , std::max(1u , context->getResolutionExtent().height)};
 
                 for(const auto& id : {0 , 1})
                 {

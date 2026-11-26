@@ -100,8 +100,8 @@ namespace AI
                 info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
                 ::AI::NKPD::GeneralData data{};
-                data.width = context->sc->extent.width;
-                data.height = context->sc->extent.height;
+                data.width = context->getResolutionExtent().width;
+                data.height = context->getResolutionExtent().height;
                 data.stepCount = 0;
                 data.validCount = 0;
 

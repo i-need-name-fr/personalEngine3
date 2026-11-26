@@ -78,6 +78,10 @@ static const float PI = 3.14159265f;
 
 #define MOX_INDIRECT_DIVISOR_RESOLUTION 2ul
 
+// the start of the NKPD training : the countdown ( in seconds , it loses dt every frame ) . while it is above 0 ReBLUR makes the picture ( it settles the hardest pixels ) and the training is off ;
+// at 0 the training starts and trainingIndex begins to count . when the training is switched off the countdown is set to this value again
+#define MOX_TRAINING_START 10.0f
+
 #define SHADING_RATE_1x1 0    // без флагов = 1x1
 #define SHADING_RATE_1x2 1    // Vertical2Pixels
 #define SHADING_RATE_1x4 2    // Vertical4Pixels
@@ -227,8 +231,8 @@ struct GeneralInfo{
     alignas(16) glm::vec3 playerDirection;
 
     float dt;
-    uint32_t screenWidth;
-    uint32_t screenHeight;
+    uint32_t resolutionWidth;
+    uint32_t resolutionHeight;
     uint32_t lightCount;
     uint32_t frameIndex;
 
@@ -247,6 +251,7 @@ struct GeneralInfo{
 
     uint32_t ReBLUR;
     uint32_t ReLAX;
+    uint32_t trainingIndex;
 
     alignas(16) glm::mat4 cullView;
     alignas(16) glm::mat4 hizViewProj;
@@ -266,8 +271,8 @@ struct GeneralInfo{
 
     float dt;
 
-    uint screenWidth;
-    uint screenHeight;
+    uint resolutionWidth;
+    uint resolutionHeight;
     uint lightCount;
     uint frameIndex;
 
@@ -285,6 +290,7 @@ struct GeneralInfo{
 
     uint ReBLUR;
     uint ReLAX;
+    uint32_t trainingIndex;
 
     float4x4 cullView;
     float4x4 hizViewProj;
@@ -645,7 +651,12 @@ struct GeneralFeatures{
     // the two floats after it are the padding : the HLSL constant buffer is rounded to 16 bytes , the size of the C++ structure is now 28 words = 112 bytes , the same
     float sssScale;
     uint32_t bloomRequired;
-    float padding1;
+    float maxEV;
+    float minEV;
+    float lowCount;
+    float highCount;
+    // the dust : the volume of Volumentric is made as DUST ( no fog : only the light of the sun and the lamps in the air , added to the picture ) . it replaces the fog while it is on
+    uint32_t dustMode;
 #else
 
     uint AO;
@@ -691,7 +702,11 @@ struct GeneralFeatures{
 
     float sssScale;
     uint32_t bloomRequired;
-    float padding1;
+    float maxEV;
+    float minEV;
+    float lowCount;
+    float highCount;
+    uint dustMode;
 #endif
 };
 
@@ -711,6 +726,16 @@ struct FogVolume{
 
     glm::vec3 color;
 
+    // the DUST ( see dustMode ) : the density ( 1 / m ) , the strength of the light , the scale of the noise ( 1 / m ) , the speed of the wind ( m / s ) , the time of the wind ( s , the CPU adds dt ) , the anisotropy
+    float dustDensity;
+    float dustIntensity;
+    float dustScale;
+    float dustSpeed;
+    float dustTime;
+    float dustG;
+    float dustPadding0;
+    float dustPadding1;
+
 #else
 
     float3 center;
@@ -725,6 +750,15 @@ struct FogVolume{
     float fogBaseHeight;
 
     float3 color;
+
+    float dustDensity;
+    float dustIntensity;
+    float dustScale;
+    float dustSpeed;
+    float dustTime;
+    float dustG;
+    float dustPadding0;
+    float dustPadding1;
 
 #endif
 };

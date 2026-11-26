@@ -59,8 +59,8 @@ namespace Passes
             const auto result = bindBarrier(cmd , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             MOX_CHECK_RESULT(result)
 
-            const std::uint32_t x = (inputData.context->sc->extent.width + 7) / 8;
-            const std::uint32_t y = (inputData.context->sc->extent.height + 7) / 8;
+            const std::uint32_t x = (inputData.context->getResolutionExtent().width + 7) / 8;
+            const std::uint32_t y = (inputData.context->getResolutionExtent().height + 7) / 8;
 
             VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};
             VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};

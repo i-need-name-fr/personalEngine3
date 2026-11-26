@@ -127,6 +127,7 @@ namespace mox
             volumentric = nullptr;
             evUpdate = nullptr;
             hdrae = nullptr;
+            dlssPass = nullptr;
             hdr = nullptr;
             relaxs = nullptr;
             relaxt = nullptr;
@@ -591,6 +592,14 @@ namespace mox
                 }
 
                 {
+                    Passes::DLSSPass::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/DLSS/DLSS";
+                    info.depth = &deferred->depthBuffer;
+                    dlssPass = std::make_shared<Passes::DLSSPass>(info);
+                }
+
+                {
                     Passes::NRCTrain::CreateInfo info{};
                     info.context = ctx;
                     info.path_S = "../Shaders/NRC/trainingShader";
@@ -706,7 +715,8 @@ namespace mox
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
                         relaxt.get() , relaxs.get() , nkpdi.get() ,
-                        volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
+                        // DLSS ( or the copy ) right after PostProcess : HDRAE and HDR read DLSSImage
+                        volumentric.get() , pProcess.get() , dlssPass.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
                     for(NodePass* pass : order)
@@ -735,7 +745,7 @@ namespace mox
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
                         relaxt.get() , relaxs.get() , nkpdi.get() ,
-                        volumentric.get() , pProcess.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
+                        volumentric.get() , pProcess.get() , dlssPass.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
                     for(NodePass* pass : order)
@@ -763,13 +773,49 @@ namespace mox
             // features : R did nothing
             features.currentMode = context->user->currentMode;
             FogVolume& fogData = fogSettings;
+            // the time of the wind of the dust ( seconds , not too big : the float loses the fractions )
+            fogData.dustTime = std::fmod(fogData.dustTime + dt , 3600.0f);
             SkyViewData& skyData = skySettings;
             SunSource& sun = sunSettings;
             GeneralInfo data = context->provideGeneralInfo(dt , lightCount , generalSettings);
             drawImGui(data , features , fogData , skyData , sun);
             generalSettings = data;
+
+            if(generalSettings.prevViewProj == generalSettings.viewProj)
+            {
+                generalSettings.trainingIndex++;
+            }
+            else
+            {
+                generalSettings.trainingIndex = 0;
+            }
+
             features.ReBLUR = data.ReBLUR;
             features.ReLAX = data.ReLAX;
+
+            GeneralFeatures uploadedFeatures = features;
+            GeneralInfo uploadedData = data;
+            {
+                bool warming = false;
+                if(!features.NKPDTrain)
+                {
+                    nkpdTrainingTimer = MOX_TRAINING_START;
+                }
+                else if(nkpdTrainingTimer > 0.0f)
+                {
+                    nkpdTrainingTimer -= dt;
+                    warming = true;
+                }
+
+                if(warming)
+                {
+                    uploadedFeatures.NKPDTrain = 0u;
+                    uploadedFeatures.ReBLUR = 1u;
+                    uploadedData.ReBLUR = 1u;
+                }
+            }
+            uploadedData.trainingIndex = generalSettings.trainingIndex;
+
             sl::Constants slData = context->convertToConstants(data);
             static uint8_t reset = true;
             if(reset)
@@ -792,11 +838,11 @@ namespace mox
             const auto frameGeneration = context->stream->setFrameGeneration();
             if(!frameGeneration.has_value()) engineLogger(frameGeneration);
 
-            sources.buffers->generalBuffer->updateBufferCmd(cmd ,data , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
+            sources.buffers->generalBuffer->updateBufferCmd(cmd ,uploadedData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.buffers->sunBuffer->updateBufferCmd(cmd ,sun , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.vol->fogBuffer->updateBufferCmd(cmd ,fogData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.atmo->skyBuffer->updateBufferCmd(cmd ,skyData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
-            sources.buffers->features->updateBufferCmd(cmd ,features , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
+            sources.buffers->features->updateBufferCmd(cmd ,uploadedFeatures , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             sources.bloom->bloomBuffer->updateBufferCmd(cmd , bloomData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
             eForge->update(cmd);
@@ -841,6 +887,12 @@ namespace mox
             featureSettings.NKPDTrain = false;
             featureSettings.bloomRequired = 1u;
 
+            featureSettings.lowCount = 0.65f;
+            featureSettings.highCount = 0.90f;
+            featureSettings.maxEV = 6.0f;
+            featureSettings.minEV = -6.0f;
+
+
             bloomData = BloomInfo{};
             bloomData.threhold = 1.0f;
             bloomData.intensity = 0.3f;
@@ -857,6 +909,15 @@ namespace mox
             fogSettings.fogBaseHeight = -2.0f;
             fogSettings.gridSize = static_cast<float>(Source::VolSource::layerCount);
             fogSettings.color = fogTint * fogGlow;
+
+            // the dust ( off by default , the DUST button )
+            featureSettings.dustMode = 0u;
+            fogSettings.dustDensity = 0.006f;
+            fogSettings.dustIntensity = 1.0f;
+            fogSettings.dustScale = 0.3f;
+            fogSettings.dustSpeed = 0.15f;
+            fogSettings.dustTime = 0.0f;
+            fogSettings.dustG = 0.6f;
 
             {
                 const float elevation = glm::radians(40.0f);
@@ -934,10 +995,12 @@ namespace mox
             if(features.NKPD && !prevNKPD)
             {
                 general.ReBLUR = 0u;
+                features.NKPDTrain = 0u;
             }
             else if(general.ReBLUR && !prevReBLUR)
             {
                 features.NKPD = 0u;
+                features.NKPDTrain = 0u;
             }
 
             // what always has to be true
@@ -946,6 +1009,7 @@ namespace mox
                 general.ReBLUR = 0u;
                 features.NKPDTrain = 0u;
             }
+            // the training needs ReBLUR ( its result is the ground truth , its temporal pass is the input of the net ) : without it the training is off , the net itself is off during the training
             if(!general.ReBLUR) features.NKPDTrain = 0u;
             if(features.NKPDTrain) features.NKPD = 0u;
 
@@ -1041,6 +1105,15 @@ namespace mox
             gui::Separator();
             gui::Text("G : a twhich direction does the light go");
             gui::SliderFloat("G" , &info.g , -0.95f , 0.95f , "%.2f");
+
+            // the dust ( the DUST button of the features ) : only the light of the sun and the lamps in the air , no fog
+            gui::Separator();
+            gui::Text("Dust ( god rays ) : the light of the sun and the lamps in the air , no fog");
+            gui::SliderFloat("Dust density" , &info.dustDensity , 0.0f , 0.05f , "%.4f" , ImGuiSliderFlags_Logarithmic);
+            gui::SliderFloat("Dust intensity" , &info.dustIntensity , 0.0f , 10.0f , "%.2f");
+            gui::SliderFloat("Dust noise scale" , &info.dustScale , 0.02f , 2.0f , "%.2f" , ImGuiSliderFlags_Logarithmic);
+            gui::SliderFloat("Dust wind speed" , &info.dustSpeed , 0.0f , 2.0f , "%.2f");
+            gui::SliderFloat("Dust G" , &info.dustG , -0.95f , 0.95f , "%.2f");
         }
     
         void drawSettingsForSun(SunSource &sun , SkyViewData& sky) noexcept{
@@ -1097,6 +1170,25 @@ namespace mox
 
         void drawSettingsForFeatures(GeneralFeatures &info) noexcept{
             namespace gui = ImGui;
+            {
+                gui::SliderFloat("min EV" , &info.minEV , -10.0f , 0.0f);
+                gui::Separator();
+                
+                gui::Spacing();
+                gui::SliderFloat("max EV" , &info.maxEV , 0.0f , 10.0f);
+                gui::Spacing();
+                gui::Separator();
+            }
+
+            {
+                gui::SliderFloat("low Count" , &info.lowCount , 0.0f , 1.0f);
+                gui::Separator();
+                
+                gui::Spacing();
+                gui::SliderFloat("high Count" , &info.highCount , 0.0f , 1.0f);
+                gui::Spacing();
+                gui::Separator();
+            }
 
             // AO
             gui::BeginDisabled(false);
@@ -1281,6 +1373,11 @@ namespace mox
                 if(gui::Button("VOLUMENTRIC RENDER")){
                     info.volumentricFog = !info.volumentricFog;
                 }
+
+                // the dust : god rays without the fog ( the light of the sun and the lamps in the air , added to the picture ) . it works without VOLUMENTRIC RENDER and replaces the fog while it is on
+                if(gui::Button(info.dustMode ? "DUST ( GOD RAYS ) ON" : "DUST ( GOD RAYS ) OFF")){
+                    info.dustMode = !info.dustMode;
+                }
             }
             gui::EndDisabled();
         }
@@ -1454,6 +1551,7 @@ namespace mox
         Passes::pReLAX<ShaderType::Spatial> relaxs;
         Passes::pHDR hdr{};
         Passes::pHDRAE hdrae{};
+        Passes::pDLSSPass dlssPass{};
         Passes::pEVUpdatePass evUpdate{};
 
         Passes::pPostProcess pProcess{};
@@ -1493,6 +1591,8 @@ namespace mox
         SkyViewData skySettings{};
         SunSource sunSettings{};
         BloomInfo bloomData{};
+        // the warm up of the NKPD training ( see update ) : the countdown ( seconds ) , is the history of ReBLUR still to be given its weight in the first frame of the training
+        float nkpdTrainingTimer{MOX_TRAINING_START};
         glm::vec3 fogTint{0.35f , 0.45f , 0.60f};
         float fogGlow{0.25f};
         uint32_t requiredMode = RasterizationRequired;

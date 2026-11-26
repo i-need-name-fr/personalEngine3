@@ -89,7 +89,7 @@ namespace Source
         {
             try
             {
-                extent = {std::max(1u , context->sc->extent.width / screenDivisor) , std::max(1u , context->sc->extent.height / screenDivisor)};
+                extent = {std::max(1u , context->getResolutionExtent().width / screenDivisor) , std::max(1u , context->getResolutionExtent().height / screenDivisor)};
 
                 // the fog data : a uniform buffer , the CPU changes it ( DeviceReadableBuffer )
                 {

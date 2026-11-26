@@ -136,9 +136,9 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     float3 readInput(const uint2 p , const bool useIndirect)
     {
 #if defined(NKPD_TRAINING)
-        // the training shader : diffuseImage / indirectImage are the ground truth ( the result of ReBLUR ) , the net gets the signal before its spatial pass
-        // tmpDiffuseImage keeps only the LAST temporal pass of ReBLUR , that is the indirect one
-        return tmpDiffuseImage[p].xyz;
+        // the training : diffuseImage / indirectImage are the ground truth ( the result of ReBLUR ) , the net gets the RAW frame ( the temporal pass of ReBLUR copies it into rawSignalImage ) :
+        // the accumulated signal is almost clean when the average is long , and the net would have nothing to learn . rawSignalImage keeps only the LAST temporal pass of ReBLUR , that is the indirect one
+        return rawSignalImage[p].xyz;
 #else
         // the inference : ReBLUR is off , the raw signal of RayGen / of the indirect pass
         if(useIndirect) return indirectImage[p].xyz;
@@ -148,8 +148,14 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     float3 readPrevInput(const uint2 p , const bool useIndirect)
     {
+#if defined(NKPD_TRAINING)
+        // the "previous" signal of the training is the raw frame too : the real one is the FINAL result of ReBLUR of the last frame ( denoised , and almost equal to the ground truth ) , the net would copy it
+        // and learn nothing . with the raw frame in both places the temporal term of the net does nothing and it learns the spatial denoise of a raw frame
+        return rawSignalImage[p].xyz;
+#else
         if(useIndirect) return prevIndirectImage[p].xyz;
         return prevDiffuseImage[p].xyz;
+#endif
     }
 
     float readHitDistance(const uint2 p , const bool useIndirect)
