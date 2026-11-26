@@ -874,7 +874,7 @@ namespace ReSTIRGI{
         const uint2 iSize = indirectSize();
         ReservoirGI prevGI = prevReSTIRGIBuffer[bufferIndex(prevIndirectPixel , iSize.x , iSize.y)];
 
-        const uint M_CAP = 30u;
+        const uint M_CAP = 10u;
         prevGI.M = min(prevGI.M , M_CAP * max(current.M , 1u));
         const GeneralObjectInfo prev = readPrevBuffer(info , prevDirectPixel);
         // now to this ReSTIR GI we are going to add MIS , it will be counted as new kinda
@@ -890,7 +890,9 @@ namespace ReSTIRGI{
         float cosMine = abs(dot(normalize(-dirFromMine),  Q_normal));
         float jacobian = (cosMine * distN * distN) / max(cosN * distMine * distMine , 1e-20);
 
-        jacobian = clamp(jacobian , 0.0f , 10.0f);
+        static const float JACOBIAN_MIN = 0.25f;
+        static const float JACOBIAN_MAX = 4.0f;
+        if(!(jacobian >= JACOBIAN_MIN && jacobian <= JACOBIAN_MAX)) return current;
 
         prevGI.W *= jacobian;
 

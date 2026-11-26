@@ -725,7 +725,7 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
 [shader("closesthit")]
 void main(inout RayPayLoadSecondary load , in BuiltInTriangleIntersectionAttributes attr)
 {   
-    const bool tale = load.depth >= MAX_PT_RAY_CAST;
+    const bool tale = (!features.NRC ? load.depth >= MAX_PT_RAY_CAST : load.depth >= MAX_PT_RAY_CAST - 2);
     load.depth++;
 
     initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
