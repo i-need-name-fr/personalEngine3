@@ -280,6 +280,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint2 gId = gPixel(id , info.useIndirect);
         const float3 cN = normalImage[gId].xyz;
         const float cD = depthImage[gId];
+        const float3 cP = positionImage[gId].xyz;
         float distance = readHitDistance(id , info.useIndirect);
         const uint2 gridSz = gridSize(info.useIndirect);
         const uint width = gridSz.x;
@@ -423,11 +424,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float finalVar = max(newMoments.y - newMoments.x * newMoments.x , 0.0f);
             
             nInput = lerp(prevInput , nInput , alpha);
-
+            const float nLum = luminance(nInput);
+            
             float sDepth = depthImage[gS];
             float3 sNormal = normalImage[gS].xyz;
-
-            float3 colorDiff = ColorDiff(nInput , centerAccumulated);
 
             float depthW = exp(-abs(cD - sDepth) /cD * DEPTH_SIGMA);
             float normalW = pow(saturate(dot(sNormal , cN)) , NORMAL_POWER);
@@ -446,11 +446,11 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             data[i * stride + 5] = prevInput.z;
             data[i * stride + 6] = normalW;
             data[i * stride + 7] =  nValid ? min(pHistory + 1.0f , MAX_ACCUM_FRAMES) / MAX_ACCUM_FRAMES : 0.0f;
-            data[i * stride + 8] = hit;
-            data[i * stride + 9] = colorDiff.x;
-            data[i * stride + 10] = colorDiff.y;
-            data[i * stride + 11] = colorDiff.z;
-            data[i * stride + 12] = motionW;
+            data[i * stride + 8] = saturate(log2(1.0f + min(hit , MAX_HIT_DISTANCE)) / log2(1.0f + MAX_HIT_DISTANCE));   // 0..1 , the log scale : the near hits ( the contact shadows ) matter more than the far ones
+            data[i * stride + 9] = (nLum - centerLum) / (nLum + centerLum + 0.01f);
+            data[i * stride + 10] = saturate(dot(sNormal , cN));   // the raw dot of the normals ( normalW is almost binary ) : the curvature of the surface
+            data[i * stride + 11] = saturate(abs(dot(positionImage[gS].xyz - cP , cN)) / cD * 8.0f);   // the distance to the plane of the centre , relative to the depth , 0..1
+            data[i * stride + 12] = log2(1.0f + motionW) / log2(1.0f + 16.0f);   // the motion in pixels : the log scale , 0 .. 1 ( 16 pixels is the biggest synthetic jitter of the training , the faster motion goes a bit over 1 )
             data[i * stride + 13] = saturate(sqrt(finalVar) / (newMoments.x + 0.01f) * 0.25f);   // the relative standard deviation of the luminance , 0..1 ( the same scale as relDev )
             data[i * stride + 14] = relativeDeviation;
             data[i * stride + 15] = zScore;
