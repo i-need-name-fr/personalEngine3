@@ -2,7 +2,7 @@
 
 #include "../NeuralBuffer/NeuralBuffer.hpp"
 #include "../../moxSourceCluster/SourceCluster.hpp"
-
+#include "../../moxSourceCluster/IndirectExtent.hpp"
 namespace mox
 {
 namespace Source
@@ -73,6 +73,7 @@ namespace AI
         Buffer::pNeuralBuffer<16 , 64 ,"NKPD_output_layer"> outputLayer;
 
         Buffer::pDeviceReadableBuffer NKPDGeneral{};
+        std::array<Image::pRenderImage2 , 2> variancePool{}; // ping pong : [frameIndex % 2] is the current , the other one is the previous
 
         ~NKPD() noexcept
         {
@@ -87,6 +88,8 @@ namespace AI
             hiddenLayer = nullptr;
             outputLayer = nullptr;
             NKPDGeneral = nullptr;
+            variancePool[0] = nullptr;
+            variancePool[1] = nullptr;
             SourceCluster::processDelete();
         }
 
@@ -189,6 +192,33 @@ namespace AI
                 }
 
                 {
+                    Image::RenderImage2::CreateInfo info{};
+                    info.context = context;
+                    info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
+                    info.imageType = VK_IMAGE_TYPE_2D;
+                    info.imageUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+                    info.clear.float32[0] = 0.0f;
+                    info.clear.float32[1] = 0.0f;
+                    info.clear.float32[2] = 0.0f;
+                    info.clear.float32[3] = 0.0f;
+                    info.mipMapCount = 1;
+                    info.layerCount = 1;
+                    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    VkExtent2D extent = context->getResolutionExtent(); // but this is only the resolution of diffuse image , we also need the indirect 
+                    const VkExtent2D iextent = Source::indirectExtent(extent);
+                    extent.width += iextent.width; // we dont care about the height , since it will max(height1 , heigh2) where resolution of diffuse wins
+                    info.extent = extent;
+                    variancePool[0] = std::make_shared<Image::RenderImage2>(info);
+                    variancePool[1] = std::make_shared<Image::RenderImage2>(info);
+                }
+
+                {
+                    const auto result = _implAddSource(variancePool , "variancePool"); // variancePool_0 , variancePool_1
+                    MOX_CHECK_RESULT(result)
+                }
+
+                {
                     const auto result = _implAddLayerSources(inputLayer , "input");
                     MOX_CHECK_RESULT(result)
                 }
@@ -252,7 +282,7 @@ namespace AI
                 // the layout : 0 NKPDGeneral , then 3 x 7 ( grad , weight , offset , staging grad , staging weight , ptr , param ) , the same order as NeuralBuffer::addBindings
                 {
                     std::vector<DescriptorLayoutData> data{};
-                    data.reserve(22);
+                    data.reserve(24);
                     data.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1});
 
                     for(uint32_t layer = 0 ; layer < 3 ; layer++)
@@ -266,6 +296,10 @@ namespace AI
                         data.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1});
                     }
 
+                    // binding 22 : variancePool ( current ) , 23 : the previous one ( once , after the 3 layers )
+                    data.push_back({VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1});
+                    data.push_back({VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1});
+
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -276,6 +310,8 @@ namespace AI
                     dlayouts.push_back(std::move(std::make_shared<DescriptorLayout>(info)));
                 }
 
+                // 2 descriptor buffers , the same as SceneImages : dbuffers[id] has variancePool[id] as the current ( 22 ) and variancePool[!id] as the previous ( 23 ) , id = frameIndex % 2
+                for(const uint32_t id : {0u , 1u})
                 {
                     std::vector<DescriptorData2> data{};
                     data.push_back(mox::DescriptorData2::createData(NKPDGeneral.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0));
@@ -284,6 +320,9 @@ namespace AI
                     hiddenLayer->addBindings(data , 8);
                     outputLayer->addBindings(data , 15);
 
+                    data.push_back(DescriptorData2::createData(variancePool[id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 22 , 0));
+                    data.push_back(DescriptorData2::createData(variancePool[!id].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 23 , 0));
+
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -291,7 +330,7 @@ namespace AI
 
                     dbuffers.push_back(std::move(std::make_shared<DescriptorBuffer2>(info)));
                 }
-                containsPingPong = false;
+                containsPingPong = true;
             }
             catch(std::exception &e)
             {

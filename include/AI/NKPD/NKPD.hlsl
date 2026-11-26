@@ -35,7 +35,10 @@ namespace NKPD
 [[vk::binding(  19  ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> outputStagingWeightBuffer;
 [[vk::binding(  20  ,   MOX_NKPD_INCLUDED    )]] ConstantBuffer<AI::ptrData> outputPtrBuffer;
 [[vk::binding(  21  ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<AI::Parameter> outputParamBuffer;
-
+[[vk::image_format("rg32f")]]
+[[vk::binding(  22  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float2> variancePool;       // the current frame ( ping pong : variancePool_[frameIndex % 2] )
+[[vk::image_format("rg32f")]]
+[[vk::binding(  23  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float2> prevVariancePool;   // the previous frame
 
 struct NKPDOptimal
 {
@@ -98,12 +101,19 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     static const uint FEATURE_COUNT = 16;
     // the length of the history ( the counter and 1 / alpha of the temporal part ) : the same as the temporal pass of ReBLUR
     static const float MAX_ACCUM_FRAMES = 64.0f;
+    static const float NKPD_VARIANCE_LUM_MAX = 64.0f;
     // the history after which the blur radius is the smallest : the same as the spatial pass of ReBLUR ( it is NOT the length of the history )
     static const float RADIUS_HISTORY_FRAMES = 32.0f;
     static const float MAX_RADIUS_PIXELS = 32.0f;
     static const float MAX_HIT_DISTANCE = 50.0f;
     static const float DEPTH_SIGMA = 8.0f;
+
+#if defined(NKPD_TRAINING)
+    static const float NORMAL_POWER = 32.0f;
+#else
     static const float NORMAL_POWER = 128.0f;
+#endif
+
     // a neighbour whose depth differs from the centre by more than this ( relative to the depth of the centre ) is NEVER used , it is another surface ( a lamp behind a pillar )
     static const float NKPD_DEPTH_CUTOFF = 0.2f;
 
@@ -189,7 +199,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         if(planeDistance > max(DISOCCLUSION_MIN_DISTANCE , viewDistance * DISOCCLUSION_RELATIVE)) return false;
 
         const float normalDot = dot(centerNormal , nNormal);
-        if(normalDot < 0.9f) return false;
+        if(normalDot < 0.7f) return false;
 
         return true;
     }
@@ -216,13 +226,57 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     #undef NKPD_ROW
     #undef NKPD_H
 
+    // the SYNTHETIC MOTION of the training ( only in the backstep shader : NKPD_TRAINING ) : the camera stands while the net is trained , so the net would never see a moving picture ( motionW = 0 , no disocclusion ) .
+    // the ground truth stays in our pixel , but the "previous" frame is read from a pixel that is shifted by this jitter ( one shift for the whole frame , the same as a turn of the camera ) .
+    // the inference : no jitter . it depends only on frameIndex , so every call in one frame gets the same shift
+    float2 trainingJitterUV()
+    {
+#if defined(NKPD_TRAINING)
+        uint seed = initSeed(uint2(7u , 13u) , generalBuffer.frameIndex);
+        const float chance = rand(seed);
+        const float angle = rand(seed) * 2.0f * PI;
+        const float r = rand(seed);
+        const float big = rand(seed);
+
+        float magnitude = 0.0f;
+        if(chance > 0.3f)                                   // 30% of the frames have no motion : the static picture does not get forgotten
+        {
+            magnitude = r * r * 4.0f;                       // 0 .. 4 pixels , mostly small
+            if(big > 0.9f) magnitude = 4.0f + r * 12.0f;    // 10% : a fast turn ( 4 .. 16 pixels ) , there are the disocclusions
+        }
+
+        return float2(cos(angle) , sin(angle)) * magnitude / float2(directSize());
+#else
+        return float2(0.0f , 0.0f);
+#endif
+    }
+
     void fillFirstLayerVector(NKPDOptimal info , out float weights[PIXEL_COUNT] , out Coop256 firstLayerVector , out float3 radiances[PIXEL_COUNT])
     {
         uint2 id = info.currentCoord;
         uint2 pid = info.prevCoord;
+
+        uint width1 , height1;
+        diffuseImage.GetDimensions(width1 , height1);
+
+        uint2 variancePixel;
+        uint2 prevVariancePixel;
+        if(!info.useIndirect)
+        {
+            variancePixel = id;
+            prevVariancePixel = pid;
+        }
+        else
+        {
+
+            variancePixel = id;
+            prevVariancePixel = pid;
+            variancePixel.x += width1; // we dont need to add height , since the real offset is based on X , not on the Y
+            prevVariancePixel += width1; 
+        }
+
         const float3 center = readInput(id , info.useIndirect);
         const float history = readHistoryCount(id , info.useIndirect);
-        // id is a pixel of the grid of the signal , gId is its pixel of the G buffer
         const uint2 gId = gPixel(id , info.useIndirect);
         const float3 cN = normalImage[gId].xyz;
         const float cD = depthImage[gId];
@@ -230,18 +284,26 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint2 gridSz = gridSize(info.useIndirect);
         const uint width = gridSz.x;
         const uint height = gridSz.y;
-        // the radius is in the pixels of the full resolution , the offsets are in the pixels of the grid of the signal ( the indirect pixel is wider )
         const float resolutionScale = float(gridSz.x) / float(directSize().x);
         distance = min(distance , MAX_HIT_DISTANCE);
         float radius = min(ComputeBlurRadius(NormalizeHitDistance(distance , cD , 0) , history ) , MAX_RADIUS_PIXELS) * resolutionScale;
 
-        const float motionW = length(motionVector[gId] * float2(width , height));
+        const float2 jitterUV = trainingJitterUV();
+        const float motionW = length((motionVector[gId] + jitterUV) * float2(width , height));
 
         const float centerAlpha = info.validUV ? 1.0f / min(history + 1.0f , MAX_ACCUM_FRAMES) : 1.0f;
         const float3 centerPrev = readPrevInput(pid , info.useIndirect);
         const float3 centerAccumulated = lerp(centerPrev , center , centerAlpha);
         const float centerLum = luminance(centerAccumulated);
         const float centerDeviation = info.validUV ? abs(luminance(center) - luminance(centerPrev)) : 0.5f * luminance(center);
+
+        {
+            const float centerVarLum = min(luminance(center) , NKPD_VARIANCE_LUM_MAX);
+            const float2 centerCur = float2(centerVarLum , centerVarLum * centerVarLum);
+            const float2 centerPrevMoments = info.validUV ? prevVariancePool[prevVariancePixel] : centerCur;
+            const float centerMomentAlpha = info.validUV ? max(1.0f / (history + 1.0f) , 1.0f / MAX_ACCUM_FRAMES) : 1.0f;
+            variancePool[variancePixel] = lerp(centerPrevMoments , centerCur , centerMomentAlpha);
+        }
 
         static const uint stride = FEATURE_COUNT;
         float data[FEATURE_COUNT * PIXEL_COUNT] = (float[FEATURE_COUNT * PIXEL_COUNT])0;
@@ -308,11 +370,15 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
                 continue;
             }
+
+
+
             const float3 P = positionImage[gS].xyz;
             float4 clipPos = mul(generalBuffer.prevViewProj , float4(P , 1.0f));
             float3 pos = clipPos.xyz / clipPos.w;
             float2 prevUV = pos.xy * 0.5f + 0.5f;
             prevUV.y = 1.0f - prevUV.y;
+            prevUV += jitterUV;   // the training : the synthetic motion ( 0 in the inference )
             const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
             uint2 prevPixel = min(uint2(max(prevUV * float2(uint2(width , height)) , 0.0f)) , uint2(width , height) - 1u);      
 
@@ -320,8 +386,24 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float3 prevInput = readPrevInput(prevPixel , info.useIndirect);
             const float pHistory = readHistoryCount(prevPixel , info.useIndirect);
 
-            // the surface check is made in the G buffer ( the full resolution ) : the point of the neighbour and the pixel of the last frame that it came from
             const bool nValid = validUV && checkDisocclusion(gS , uvToDirectPixel(saturate(prevUV)));
+
+            uint2 nVariancePixel;
+            uint2 nPrevVariancePixel;
+
+            if(!info.useIndirect)
+            {
+                nVariancePixel = samplePos;
+                nPrevVariancePixel = prevPixel;
+            }
+            else
+            {
+
+                nVariancePixel = samplePos;
+                nPrevVariancePixel = prevPixel;
+                nVariancePixel.x += width1; // we dont need to add height , since the real offset is based on X , not on the Y
+                nPrevVariancePixel += width1; 
+            }
 
             float alpha = 1.0f;
             if(nValid)
@@ -333,6 +415,13 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             const float nPrevLum = luminance(prevInput);
             const float nDeviation = nValid ? abs(nRawLum - nPrevLum) : 0.5f * nRawLum;
 
+            const float varLumIn = min(luminance(nInput) , NKPD_VARIANCE_LUM_MAX);   // the cut : no fireflies , lum^2 is far from the float limit
+            const float2 curMoments = float2(varLumIn , varLumIn * varLumIn);
+            const float2 prevMoments = nValid ? prevVariancePool[nPrevVariancePixel] : curMoments;
+            const float momentAlpha = nValid ? max(1.0f / (pHistory + 1.0f) , 1.0f / MAX_ACCUM_FRAMES) : 1.0f;   // 1 / ( count + 1 ) , not lower than 1 / MAX_ACCUM_FRAMES
+            const float2 newMoments = lerp(prevMoments , curMoments , momentAlpha);
+            const float finalVar = max(newMoments.y - newMoments.x * newMoments.x , 0.0f);
+            
             nInput = lerp(prevInput , nInput , alpha);
 
             float sDepth = depthImage[gS];
@@ -356,13 +445,13 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             data[i * stride + 4] = prevInput.y;
             data[i * stride + 5] = prevInput.z;
             data[i * stride + 6] = normalW;
-            data[i * stride + 7] = depthW;
+            data[i * stride + 7] =  nValid ? min(pHistory + 1.0f , MAX_ACCUM_FRAMES) / MAX_ACCUM_FRAMES : 0.0f;
             data[i * stride + 8] = hit;
             data[i * stride + 9] = colorDiff.x;
             data[i * stride + 10] = colorDiff.y;
             data[i * stride + 11] = colorDiff.z;
             data[i * stride + 12] = motionW;
-            data[i * stride + 13] = sqrt(alpha / (2 - alpha));
+            data[i * stride + 13] = saturate(sqrt(finalVar) / (newMoments.x + 0.01f) * 0.25f);   // the relative standard deviation of the luminance , 0..1 ( the same scale as relDev )
             data[i * stride + 14] = relativeDeviation;
             data[i * stride + 15] = zScore;
 
@@ -469,11 +558,12 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint2 g = gPixel(pixel , useIndirect);
 
         const float2 uv = (float2(pixel) + 0.5f) / float2(gridSz);
-        const float2 prevUV = uv + motionVector[g];
+        const float2 jitterUV = trainingJitterUV();   // the training : the synthetic motion ( 0 in the inference )
+        const float2 prevUV = uv + motionVector[g] + jitterUV;
 
         // the surface check : in the G buffer , from the point that the pixel looks at ( the same as the temporal pass of ReBLUR )
         const float2 gUV = (float2(g) + 0.5f) / float2(dSize);
-        const float2 gPrevUV = gUV + motionVector[g];
+        const float2 gPrevUV = gUV + motionVector[g] + jitterUV;
         const uint2 gPrev = uint2(round(clamp(gPrevUV * float2(dSize) - 0.5f , float2(0.0f , 0.0f) , float2(dSize) - 1.0f)));
 
         NKPDOptimal info;
@@ -519,7 +609,6 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         [unroll]
         for(uint i = 0 ; i < PIXEL_COUNT ; i++)
         {
-            // the same weight as in forwardNKPD : the mask times the SIGMOID of the raw output ( the raw output itself is not a weight )
             const float raw = rawOutput(o , i);
             wSum += weights[i] / (1.0f + exp(-raw));
         }
