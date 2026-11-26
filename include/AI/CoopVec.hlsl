@@ -215,4 +215,46 @@ V reluGate(V z)
     return coop::step<V>(zero , z);
 }
 
+static const float16_t LEAKY_SLOPE = float16_t(0.01f);
+
+// max( z , 0.01 * z ) : z for z > 0 , 0.01 * z for z < 0
+template<typename V>
+V leakyRelu(V z)
+{
+    return coop::max<V>(z , coop::timesScalar<V>(z , LEAKY_SLOPE));
+}
+
+template<typename V>
+V leakyReluGate(V z)
+{
+    const V zero = coop::sub<V>(z , z);
+    const V one = coop::step<V>(zero , zero);
+    const V open = coop::step<V>(zero , z);
+    return coop::max<V>(open , coop::timesScalar<V>(one , LEAKY_SLOPE));
+}
+
+// ---------------------------------------------------------------- the guard of fp16
+// the same value in all the components ( a constant vector that does not depend on the data : z - z is NaN for an inf )
+Coop16 splat16(const float16_t v)
+{
+    return construct16(v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v);
+}
+
+Coop64 splat64(const float16_t v)
+{
+    return construct64(v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v , v);
+}
+
+static const float16_t FP16_SAFE_LIMIT = float16_t(30000.0f);
+
+Coop64 clampFinite(Coop64 z)
+{
+    return clamp<Coop64>(z , splat64(-FP16_SAFE_LIMIT) , splat64(FP16_SAFE_LIMIT));
+}
+
+Coop16 clampFinite(Coop16 z)
+{
+    return clamp<Coop16>(z , splat16(-FP16_SAFE_LIMIT) , splat16(FP16_SAFE_LIMIT));
+}
+
 }

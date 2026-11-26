@@ -3,14 +3,14 @@
 #define MOX_SCENE_BUFFERS_INCLUDED 0
 #include "../../include/moxSourceCluster/SceneBuffers.hlsl"
 
-const static float adaptationLight = 3.0f;
-const static float adaptationNight = 1.5f;
+const static float adaptationLight = 1.0f;
+const static float adaptationNight = 0.5f;
 
 static const float MIDDLE_GRAY_EV = -2.474f;   // log2(0.18)
 static const float LOW_PERCENT  = 0.65f;
 static const float HIGH_PERCENT = 0.90f;
 
-static const float MAX_EV = 2.0f;
+static const float MAX_EV = 3.0f;
 static const float MIN_EV = -6.0f;
 
 // one thread , once per frame : 255 bins

@@ -148,7 +148,8 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
             const float NdotL = saturate(dot(data.N , L));
             // a disk shines only to the side it faces
             const float DdotL = saturate(dot(-L , light.direction));
-            const float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - 1e-3f);
+            // the ray is traced only if the light can reach the point at all ( the surface faces the lamp and the lamp faces the surface ) : otherwise the result is multiplied by 0 anyway
+            const float shadow = (NdotL * DdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - 1e-3f) : 0.0f;
             const float window = calculateLightWindow(light , d);
 
             result = diffuseWithoutAlbedo(data , L) * light.diffuse * shadow * window * NdotL * DdotL * lightCount / max(pdf_A * d * d , 0.0001f);
@@ -161,7 +162,7 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
             realL = normalize(realL);
 
             const float NdotL = saturate(dot(data.N , realL));
-            const float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , realL , dist);
+            const float shadow = (NdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , realL , dist) : 0.0f;
             const float window = lightAttenuation(light , dist);
 
             result = NdotL * light.diffuse * diffuseWithoutAlbedo(data , realL) * shadow * window * lightCount;
@@ -172,10 +173,11 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
     if(sunBuffer.intensity > 0.0f)
     {
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-        // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing
+        // the shadow of the sun is traced only under the open sky AND if the surface faces the sun , in the other case the sun gives nothing
+        const float sunNdotL = saturate(dot(data.N , L));
         float sunShadow = 0.0f;
-        if(skyVisibility > 0.0f) sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
-        result += diffuseWithoutAlbedo(data , L) * saturate(dot(data.N , L)) * sunBuffer.diffuse * sunShadow;
+        if(skyVisibility > 0.0f && sunNdotL > 0.0f) sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        result += diffuseWithoutAlbedo(data , L) * sunNdotL * sunBuffer.diffuse * sunShadow;
     }
 
     if(skyVisibility > 0.0f)

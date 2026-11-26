@@ -630,7 +630,8 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
         const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
         const float NdotL = saturate(dot(info.N , L));
         float shadow = 0.0f;
-        if(skyVisibility > 0.0f){
+        // the shadow of the sun is traced only under the open sky AND if the surface faces the sun
+        if(skyVisibility > 0.0f && NdotL > 0.0f){
             shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , 1000.0f);
         }
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;

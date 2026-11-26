@@ -167,8 +167,6 @@ namespace AI
                 {
                     Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">::CreateInfo info{};
                     info.context = context;
-                    info.max = 0.001f;
-                    info.min = 0.00001f;
                     info.needsToWriteFile = true;
 
                     inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">>(info);
@@ -177,8 +175,6 @@ namespace AI
                 {
                     Buffer::NeuralBuffer<64 , 64 , "NKPD_hidden_layer">::CreateInfo info{};
                     info.context = context;
-                    info.max = 0.001f;
-                    info.min = 0.00001f;
                     info.needsToWriteFile = true;
 
                     hiddenLayer = std::make_shared<Buffer::NeuralBuffer<64 , 64 , "NKPD_hidden_layer">>(info);
@@ -187,8 +183,6 @@ namespace AI
                 {
                     Buffer::NeuralBuffer<16 , 64 , "NKPD_output_layer">::CreateInfo info{};
                     info.context = context;
-                    info.max = 0.001f;
-                    info.min = 0.00001f;
                     info.needsToWriteFile = true;
 
                     outputLayer = std::make_shared<Buffer::NeuralBuffer<16 , 64 , "NKPD_output_layer">>(info);

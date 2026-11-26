@@ -172,6 +172,7 @@ namespace mox
             sources.restir = nullptr;
             sources.images = nullptr;
             sources.buffers = nullptr;
+            sources.bloom = nullptr;
 
             step("the context ( the swapchain , the queues , Streamline , the device )");
             context = nullptr;

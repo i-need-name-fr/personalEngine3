@@ -389,6 +389,20 @@ struct ReservoirGI{
             roughness = can.roughness;
         }
     }
+
+    void update( ReservoirGI can ,float w , uint canM , float randomValue, float motionW , float LdotL2 ){
+        M += canM;
+        weightSum += w;
+        // same guarded form as ReservoirDI::update - no division by a possibly zero weightSum
+        if(weightSum > 0.0f && randomValue * weightSum < w){
+            samplePos = can.samplePos;
+            sampleNormal = can.sampleNormal;
+            roughness = can.roughness;
+
+            const float alpha = max(motionW , 1.0f / float(M));
+            radiance = lerp(radiance , can.radiance * LdotL2 , alpha);
+        }
+    }
 #endif
 
     float W;
@@ -403,7 +417,7 @@ struct ReservoirSS
     alignas(16) glm::vec3 radiance;
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec3 normal;
-
+    
 #else
     float3 radiance;
     float3 position;

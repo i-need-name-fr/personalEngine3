@@ -368,6 +368,13 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     // forward
 
+    // the raw output of the net for the neighbour i : a value that is not finite ( an overflow of fp16 ) is 0 , the rest is cut to +-20 ( sigmoid is flat there anyway ) . forward and backstep use the same function
+    float rawOutput(const Coop16 o , const uint i)
+    {
+        const float raw = float(coop::extractDynamic(o , i));
+        return isfinite(raw) ? clamp(raw , -20.0f , 20.0f) : 0.0f;
+    }
+
     float3 forwardNKPD(NKPDOptimal info ,
                     out Coop256 x , out Coop64 z1 , out Coop64 h1 , out Coop64 z2 , out Coop64 h2 ,
                     out Coop16 o , out float weights[PIXEL_COUNT] , out float3 radiances[PIXEL_COUNT] ,
@@ -385,22 +392,25 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
                                                     64 , 256 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 256 * 2 , 0);
 
 
+        inputResult = coop::clampFinite(inputResult);
         z1 = inputResult;
-        inputResult = coop::relu(inputResult);
+        inputResult = coop::leakyRelu(inputResult);
         h1 = inputResult;
 
         Coop64 hiddenResult = coop::matMulAdd<Coop64>(inputResult , NP_F16 , pHiddenWeights.Get().data , 0 , NP_F16,
                                                     pHiddenWeights.Get().data , int(hiddenOffsetBuffer.BIAS_OFFSET) , NP_F16,
                                                     64 , 64 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 64 * 2 , 0);
 
+        hiddenResult = coop::clampFinite(hiddenResult);
         z2 = hiddenResult;
-        hiddenResult = coop::relu(hiddenResult);
+        hiddenResult = coop::leakyRelu(hiddenResult);
         h2 = hiddenResult;
 
         Coop16 outputResult = coop::matMulAdd<Coop16>(hiddenResult , NP_F16 , pOutputWeights.Get().data , 0 , NP_F16,
                                                     pOutputWeights.Get().data , int(outputOffsetBuffer.BIAS_OFFSET) , NP_F16,
                                                     16 , 64 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 64 * 2 , 0);
 
+        outputResult = coop::clampFinite(outputResult);
         o = outputResult;
 
         float w[PIXEL_COUNT];
@@ -408,7 +418,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         [unroll]
         for(uint i = 0 ; i < PIXEL_COUNT ; i++)
         {
-            const float raw = float(coop::extractDynamic(outputResult , i));
+            const float raw = rawOutput(outputResult , i);
             w[i] = weights[i] / (1.0f + exp(-raw));
             wSum += w[i];
         }
@@ -438,7 +448,10 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             sum += w[j] * radiances[j];
         }
 
-        return sum / (1.0f + wSum);
+        // a NaN here would go into the history ( lerp( prev , center , alpha ) of the next frame ) and spread over the whole picture : the pixel falls back to the raw signal
+        float3 filtered = sum / (1.0f + wSum);
+        if(!all(isfinite(filtered))) filtered = all(isfinite(center)) ? center : float3(0.0f , 0.0f , 0.0f);
+        return filtered;
     }
 
     // the info of a pixel : the pixel of the last frame ( by the motion vector ) and is it usable
@@ -501,18 +514,21 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         for(uint i = 0 ; i < PIXEL_COUNT ; i++)
         {
             // the same weight as in forwardNKPD : the mask times the SIGMOID of the raw output ( the raw output itself is not a weight )
-            const float raw = float(coop::extractDynamic(o , i));
+            const float raw = rawOutput(o , i);
             wSum += weights[i] / (1.0f + exp(-raw));
         }
         const float3 g = 2.0f * (result - ideal) / (result * result + 1e-3f);
+        const bool useStep = valid && all(isfinite(g)) && isfinite(wSum);
         [unroll]
         for(uint i = 0 ; i < PIXEL_COUNT ; i++)
         {
-            const float raw = float(coop::extractDynamic(o , i));
+            const float raw = rawOutput(o , i);
             const float s = 1.0f / (1.0f + exp(-raw));
             const float dw_draw = weights[i] * s * (1.0f - s);                    
             const float dL_dw = dot(g , radiances[i] - result) / (1.0f + wSum);
-            dOut[i] = dL_dw * dw_draw * (valid ? 1.0f / 16.0f : 0.0f);  
+            const float d = dL_dw * dw_draw * (1.0f / 16.0f);
+            // the gradient is fp16 : it is cut , and a value that is not finite is 0
+            dOut[i] = (useStep && isfinite(d)) ? clamp(d , -30000.0f , 30000.0f) : 0.0f;
         }
         Coop16 inversedCoop = coop::construct16(float16_t(dOut[0]) , float16_t(dOut[1]) , float16_t(dOut[2]), float16_t(dOut[3])
                                             , float16_t(dOut[4]) , float16_t(dOut[5]) ,float16_t(dOut[6]) ,float16_t(dOut[7])
@@ -529,16 +545,14 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
         coop::outerProduct(pOutputGrads.Get().data , 0 , inversedCoop , h2 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 64 * 2);
 
-        // Out matMul(In input , int inputInterp , [[vk::ext_reference]] uint matrix[1 << 20] , int matrixOffset , int matrixInterp , int M , int K , int layout , bool transpose , uint stride , [[vk::ext_literal]] int memoryOperand);
-        // void outerProduct([[vk::ext_reference]] uint pointer[1 << 20] , int offset , A a , B b , int layout , int matrixInterp , uint stride);
 
         Coop64 layer2 = coop::matMul<Coop64>(inversedCoop , NP_F16 , pOutputWeights.Get().data , int(outputOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 64 , 16 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 64 * 2 , 0);
-        Coop64 gate2 = coop::reluGate(z2);
+        Coop64 gate2 = coop::leakyReluGate(z2);
         Coop64 dz2 = coop::mul(layer2 , gate2);
         coop::outerProduct(pHiddenGrads.Get().data , 0 , dz2 , h1 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 64 * 2);
 
         Coop64 layer1 = coop::matMul<Coop64>(dz2 , NP_F16 , pHiddenWeights.Get().data , int(hiddenOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 64 , 64 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 64 * 2 , 0);
-        Coop64 gate1 = coop::reluGate(z1);
+        Coop64 gate1 = coop::leakyReluGate(z1);
         Coop64 dz1 = coop::mul(layer1 , gate1);
         coop::outerProduct(pInputGrads.Get().data , 0 , dz1 , x , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 256 * 2);
 
@@ -549,7 +563,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     // apply
 
-    static const float NP_LR_MLP = 1e-3f;
+    static const float NP_LR_MLP = 1e-4f;
     static const float NP_GRAD_SCALE = 1.0f / 16.0f;
 
     void recordAdam_input(const uint3 id)

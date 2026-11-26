@@ -562,7 +562,8 @@ namespace ReSTIRGI{
                 computeLight(data ,L , diffuse , specular );
                 const float NdotL = saturate(dot(data.N , L));  
                 const float DdotL = saturate(dot(-L , light.direction));
-                float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - epsilon);
+                // the ray is traced only if the light can reach the point at all ( the surface faces the lamp and the lamp faces the surface )
+                float shadow = (NdotL * DdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - epsilon) : 0.0f;
                 float window = calculateLightWindow(light , d);
                 
                 diffuse /= saveAlbedo;
@@ -586,7 +587,7 @@ namespace ReSTIRGI{
                 computeLight(data ,realL , diffuse , specular );
 
                 const float NdotL = saturate(dot(data.N , realL));  
-                float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist);
+                float shadow = (NdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist) : 0.0f;
                 float window = lightAttenuation(light, dist);
                 diffuse /= saveAlbedo;
                 result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
@@ -598,14 +599,15 @@ namespace ReSTIRGI{
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-            // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+            // the shadow of the sun is traced only under the open sky AND if the surface faces the sun , in the other case the sun gives nothing ( 0 )
+            const float sunNdotL = saturate(dot(data.N , L));
             float sunShadow = 0.0f;
-            if(skyVisibility > 0.0f){
+            if(skyVisibility > 0.0f && sunNdotL > 0.0f){
                 sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
             }
             computeLight(data , L , sunDiffuse , sunSpecular);
             sunDiffuse /= saveAlbedo;
-            result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+            result += (sunDiffuse) * sunNdotL * sunBuffer.diffuse  * sunShadow;
         }
 
         // the light of the sky : only under the open sky ( skyVisibility > 0 )

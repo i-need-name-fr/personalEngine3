@@ -481,7 +481,9 @@ namespace ReSTIRPT
         const float epsilon = 0.02f;
         const float d = length(direction) - epsilon;
         direction = normalize(direction);
-        
+        // the sample is behind the surface : it is not seen from this pixel , the ray is not needed ( the reservoir is not suitable )
+        if(dot(info.N , direction) <= 0.0f) return c;
+
         const float shadow = calculateShadows(offsetRay(info.P, info.N, generalBuffer.playerPosition) , direction , d);
         
         if(shadow != 1.0f) return c; // since we dont want to check reservoir that is not suitable for us 

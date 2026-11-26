@@ -162,7 +162,8 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
             const float NdotL = saturate(dot(data.N , L));
             // a disk shines only to the side it faces
             const float DdotL = saturate(dot(-L , light.direction));
-            const float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - 1e-3f);
+            // the ray is traced only if the light can reach the point at all ( the surface faces the lamp and the lamp faces the surface ) : otherwise the result is multiplied by 0 anyway
+            const float shadow = (NdotL * DdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - 1e-3f) : 0.0f;
             const float window = calculateLightWindow(light , d);
 
             result = diffuseWithoutAlbedo(data , L) * light.diffuse * shadow * window * NdotL * DdotL * lightCount / max(pdf_A * d * d , 0.0001f);
@@ -175,7 +176,7 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
             realL = normalize(realL);
 
             const float NdotL = saturate(dot(data.N , realL));
-            const float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , realL , dist);
+            const float shadow = (NdotL > 0.0f) ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , realL , dist) : 0.0f;
             const float window = lightAttenuation(light , dist);
 
             result = NdotL * light.diffuse * diffuseWithoutAlbedo(data , realL) * shadow * window * lightCount;
@@ -186,10 +187,11 @@ float3 computeDirectAt(const GeneralObjectInfo data , inout uint seed)
     if(sunBuffer.intensity > 0.0f)
     {
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-        // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing
+        // the shadow of the sun is traced only under the open sky AND if the surface faces the sun , in the other case the sun gives nothing
+        const float sunNdotL = saturate(dot(data.N , L));
         float sunShadow = 0.0f;
-        if(skyVisibility > 0.0f) sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
-        result += diffuseWithoutAlbedo(data , L) * saturate(dot(data.N , L)) * sunBuffer.diffuse * sunShadow;
+        if(skyVisibility > 0.0f && sunNdotL > 0.0f) sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        result += diffuseWithoutAlbedo(data , L) * sunNdotL * sunBuffer.diffuse * sunShadow;
     }
 
     if(skyVisibility > 0.0f)
@@ -691,7 +693,7 @@ namespace ReSTIRGI{
                 computeLight(data ,L , diffuse , specular );
                 const float NdotL = saturate(dot(data.N , L));  
                 const float DdotL = saturate(dot(-L , light.direction));
-                float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - epsilon);
+                float shadow = (NdotL > 0.0f ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , d - epsilon) : 0.0f);
                 float window = calculateLightWindow(light , d);
                 
                 diffuse /= saveAlbedo;
@@ -715,7 +717,7 @@ namespace ReSTIRGI{
                 computeLight(data ,realL , diffuse , specular );
 
                 const float NdotL = saturate(dot(data.N , realL));  
-                float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist);
+                float shadow = (NdotL > 0.0f ? calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist) : 0.0f);
                 float window = lightAttenuation(light, dist);
                 diffuse /= saveAlbedo;
                 result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
@@ -729,12 +731,13 @@ namespace ReSTIRGI{
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
             // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
             float sunShadow = 0.0f;
-            if(skyVisibility > 0.0f){
+            const float NdotL =  clamp(dot(data.N , L),  0.0f , 1.0f);
+            if(skyVisibility > 0.0f && NdotL > 0.0f){
                 sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
             }
             computeLight(data , L , sunDiffuse , sunSpecular);
             sunDiffuse /= saveAlbedo;
-            result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+            result += (sunDiffuse) * NdotL * sunBuffer.diffuse  * sunShadow;
         }
 
         // the light of the sky : only under the open sky ( skyVisibility > 0 )
@@ -778,7 +781,7 @@ namespace ReSTIRGI{
         ray.Origin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
         ray.Direction = L;
         ray.TMax = 1000.0f;
-        ray.TMin = 0.0001f;
+        ray.TMin = 0.001f;
 
         RayQuery<RAY_FLAG_NONE> rq;
         rq.TraceRayInline(TLAS , RAY_FLAG_NONE , 0x01 , ray);
@@ -861,8 +864,12 @@ namespace ReSTIRGI{
         return luminance(fcos * a.radiance);
     }
 
+    // how many pixels the point moved on the screen from the last frame : more than this ( in pixels ) and the stored radiance is replaced by the new one at once
+    static const float MOTION_TOLERANCE = 8.0f;
+
     // prevIndirectPixel : the reservoir of the last frame ( the resolution of indirectImage ) , prevDirectPixel : the G buffer of the last frame ( the full resolution )
-    ReservoirGI temporalReuse_GI( inout uint seed ,ReservoirGI current , uint2 prevIndirectPixel , uint2 prevDirectPixel , GeneralObjectInfo info){
+    // motionW : 0 for a still point , 1 for a point that moved MOTION_TOLERANCE pixels or more
+    ReservoirGI temporalReuse_GI( inout uint seed ,ReservoirGI current , uint2 prevIndirectPixel , uint2 prevDirectPixel , GeneralObjectInfo info , const float motionW){
         ReservoirGI r = (ReservoirGI)0;
         const uint2 iSize = indirectSize();
         ReservoirGI prevGI = prevReSTIRGIBuffer[bufferIndex(prevIndirectPixel , iSize.x , iSize.y)];
@@ -898,8 +905,14 @@ namespace ReSTIRGI{
         const float w_c = m_a * p_hat_A_x_a * current.W;
         const float w_p = m_b * p_hat_A_x_b * prevGI.W;
 
-        r.update(current , w_c , current.M , rand(seed));
-        r.update(prevGI , w_p , prevGI.M , rand(seed));
+        // LdotL2 : how much the direction to the sample point differs between this pixel ( L , to Q ) and the pixel of the last frame ( L2 , to Q ) : 1 = the same direction , the radiance of
+        // the old sample is taken with this weight . the new sample is seen from this pixel only : 1
+        const float LdotL2 = saturate(dot(normalize(dirFromMine) , normalize(dirFromQ)));
+
+        // the first update takes the radiance whole ( alpha = 1 , the reservoir is empty : lerp from 0 would make it darker ) ; the same if nothing was taken yet ( weightSum = 0 )
+        r.update(current , w_c , current.M , rand(seed) , 1.0f , 1.0f);
+        const float motionPrev = (r.weightSum > 0.0f) ? motionW : 1.0f;
+        r.update(prevGI , w_p , prevGI.M , rand(seed) , motionPrev , LdotL2);
 
         const float p_hat = targetFunction(r , info);
         r.W = (p_hat > 0.0f && current.M > 0u) ? r.weightSum / p_hat : 0.0f;
@@ -933,7 +946,13 @@ namespace ReSTIRGI{
                 // the reservoir of prevIndirect was made for this pixel of the G buffer ( the jitter of the last frame ) : its position and normal are the ones the jacobian needs
                 const uint2 prevDirect = prevDirectPixelOf(prevIndirect);
                 if(historyMatchesPosition(info.P , prevDirect)){
-                    res = temporalReuse_GI(seed , res , prevIndirect , prevDirect , info);
+                    // the motion on the screen : from the pixel of the G buffer that this indirect pixel looks at to the point where the same surface was in the last frame ( the same measure as the SHaRC )
+                    const uint2 directPixel = indirectToDirectPixel(indirectPixel , indirectJitter(indirectPixel , generalBuffer.frameIndex));
+                    const float2 dSize = float2(directSize());
+                    const float2 currentUV = (float2(directPixel) + 0.5f) / dSize;
+                    const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , length((uv - currentUV) * dSize));
+
+                    res = temporalReuse_GI(seed , res , prevIndirect , prevDirect , info , motionW);
                 }
             }
         }
