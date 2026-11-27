@@ -5,6 +5,7 @@
 #include "../moxSourceCluster/SceneImages.hpp"
 #include "../moxSourceCluster/SceneBuffers.hpp"
 #include "../AI/NKPD/NKPD.hpp"
+#include "NKPDPassCommon.hpp"
 
 namespace mox
 {
@@ -65,9 +66,13 @@ namespace Passes
             const VkExtent2D gridExtent = forIndirect ? Source::indirectExtent(inputData.context->getResolutionExtent()) : inputData.context->getResolutionExtent();
             const std::uint32_t x = ( gridExtent.width / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
             const std::uint32_t y = ( gridExtent.height / MOX_NKPD_RESOLUTION_DIVISOR + 7) / 8;
-            const uint32_t push = forIndirect ? 1 : 0 ;
-            vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(uint32_t), &push);
-            vkCmdDispatch(cmd , x , y , 1);
+            // the same pixels ( the seed of the tile ) are trained with the steps of all the passes : the neighbours are read from the RAW signal every time ( the training has no result of the previous pass )
+            for(const std::uint32_t step : NKPD_PASS_STEPS)
+            {
+                const std::uint32_t push[2] = {forIndirect ? 1u : 0u , step};
+                vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(push) , push);
+                vkCmdDispatch(cmd , x , y , 1);
+            }
 
             shaders[0] = nullptr;
 
@@ -112,7 +117,7 @@ namespace Passes
                 VkPushConstantRange push{};
                 push.offset = 0;
                 push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-                push.size = sizeof(uint32_t);
+                push.size = sizeof(std::uint32_t) * 2;   // the grid ( direct or indirect ) and the step of the pass
                 pipe = std::make_shared<ShaderPipe2>(inputData.context);
                 const auto result = processPipe(pipe.get() , VK_SHADER_STAGE_COMPUTE_BIT, {push});
                 MOX_CHECK_RESULT(result)

@@ -13,6 +13,14 @@
 #include "../../include/AI/NKPD/NKPD.hlsl"
 using namespace AI::NKPD;
 
+// the passes of the net : step 1 ( the temporal one , reads the raw signal of indirectImage ) then 2 and more ( read the result of the previous pass from tmpDiffuseImage ) . the LAST pass writes indirectImage , the others write tmpDiffuseImage
+[[vk::push_constant]] struct 
+{
+    uint stepSize;
+    uint last;
+} push;
+
+
 [shader("compute")]
 [numthreads(8 , 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID)
@@ -22,17 +30,25 @@ void main(uint3 id : SV_DispatchThreadID)
 
     if(!features.NKPD) return;
 
+    const bool first = push.stepSize <= 1u;
+
     if(pixelCheck[gPixel(id.xy , true)] != COLOR_PIXEL)
     {
-        diffuseHistoryImage[id.xy] = float4(diffuseHistoryImage[id.xy].r , 0.0f , 0.0f , 0.0f);
+        if(first) diffuseHistoryImage[id.xy] = float4(diffuseHistoryImage[id.xy].r , 0.0f , 0.0f , 0.0f);
         return;
     }
 
     NKPDOptimal info = buildNKPDInfo(id.xy , true);
     float count = 0.0f;
-    const float3 result = askNKPD(info , count);
-    const float indirectCount = info.validUV ? min(count + 1.0f , MAX_ACCUM_FRAMES) : 1.0f;
+    const float3 result = askNKPD(info , count , float(push.stepSize));
 
-    indirectImage[id.xy] = float4(result , 1.0f);
-    diffuseHistoryImage[id.xy] = float4(diffuseHistoryImage[id.xy].r , indirectCount , 0.0f , 0.0f);
+    // the counter of the history is written only by the pass 1
+    if(first)
+    {
+        const float indirectCount = info.validUV ? min(count + 1.0f , MAX_ACCUM_FRAMES) : 1.0f;
+        diffuseHistoryImage[id.xy] = float4(diffuseHistoryImage[id.xy].r , indirectCount , 0.0f , 0.0f);
+    }
+
+    if(push.last != 0u) indirectImage[id.xy] = float4(result , 1.0f);
+    else tmpDiffuseImage[id.xy] = float4(result , 1.0f);
 }

@@ -15,6 +15,7 @@ static const uint TASK_GROUP_SIZE = 32;
 struct Payload
 {
     uint layoutIndex;
+    uint32_t LOD;
     uint meshletID[TASK_GROUP_SIZE];
 };
 
@@ -76,7 +77,21 @@ bool ProjectAABBToScreen(float3 boxMax , float3 boxMin , float4x4 vp , out float
     return true;
 }
 
+static const float distances[4] = {100.0f * 100.0f , 50.0f * 50.0f , 20.0f * 20.0f , 5.0f * 5.0f};
+uint32_t getLOD(const float3 P)
+{
 
+    const float3 dist = generalBuffer.playerPosition - P;
+    const float distSq = dot(dist , dist);
+
+    [unroll]
+    for(int32_t i = 3 ; i >= 0 ; i--)
+    {
+        if(distSq <= distances[i]) return i + 1;
+    }
+
+    return 1;
+}
 
 static const int MAX_OCCLUSION_TEXELS = 4;
 static const float OCCLUSION_BIAS = 1e-6f;
@@ -244,6 +259,14 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
             {
                 // visible = !backFacing;
                 visible = true;
+                if(features.Tesselation)
+                {
+                    sPayload.LOD = getLOD(center);
+                }
+                else
+                {
+                    sPayload.LOD = 1;
+                }
             }
         }
     }

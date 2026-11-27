@@ -1,17 +1,19 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include "../moxNode/NodePass.hpp"
 #include "../moxSourceCluster/IndirectExtent.hpp"
 #include "../moxSourceCluster/SceneImages.hpp"
 #include "../moxSourceCluster/SceneBuffers.hpp"
 #include "../AI/NKPD/NKPD.hpp"
+#include "NKPDPassCommon.hpp"
 
 namespace mox
 {
 namespace Passes
 {
-    // NKPD of the INDIRECT light : the net denoises the pixels of indirectImage ( its own resolution ) , one thread = one indirect pixel . the diffuse signal is denoised in PostProcess ( the full resolution ) .
-    // it has to be before PostProcess ( PostProcess upsamples the result ) and after the passes that make the raw indirect signal
     class NKPDInference : public NodePass
     {
     public:
@@ -61,9 +63,14 @@ namespace Passes
 
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
 
-            // the grid of the indirect light : read every frame ( the size of the window can change )
             const VkExtent2D extent = Source::indirectExtent(inputData.context->getResolutionExtent());
-            vkCmdDispatch(cmd , (extent.width + 7) / 8 , (extent.height + 7) / 8 , 1);
+            for(std::size_t i = 0 ; i < NKPD_PASS_STEPS.size() ; i++)
+            {
+                const NKPDPassPush push{NKPD_PASS_STEPS[i] , (i + 1 == NKPD_PASS_STEPS.size()) ? 1u : 0u};
+                vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(NKPDPassPush) , &push);
+                vkCmdDispatch(cmd , (extent.width + 7) / 8 , (extent.height + 7) / 8 , 1);
+                if(i + 1 < NKPD_PASS_STEPS.size()) nkpdPassBarrier(cmd);
+            }
 
             shaders[0] = nullptr;
 
@@ -104,8 +111,12 @@ namespace Passes
 
             try
             {
+                VkPushConstantRange push{};
+                push.offset = 0;
+                push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                push.size = sizeof(NKPDPassPush);
                 pipe = std::make_shared<ShaderPipe2>(inputData.context);
-                const auto result = processPipe(pipe.get() , VK_SHADER_STAGE_COMPUTE_BIT);
+                const auto result = processPipe(pipe.get() , VK_SHADER_STAGE_COMPUTE_BIT , {push});
                 MOX_CHECK_RESULT(result)
 
                 {
@@ -115,7 +126,7 @@ namespace Passes
                     info.nextStage = 0;
                     info.filePath = inputData.path_S + ".hlsl";
                     info.layouts = pipe->getLayouts();
-                    info.pushes = {};
+                    info.pushes = {push};
 
                     pipe->addShader(info);
                 }

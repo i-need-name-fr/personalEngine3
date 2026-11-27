@@ -655,6 +655,8 @@ struct GeneralFeatures{
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
 
+    uint32_t Tesselation;
+
     // the multiplier of the sigma of the subsurface scattering of EVERY material ( ReSTIR SSS ) : 1 = the sigma of the material , the bigger the wider the scattering ( the debug : to see the effect on a scene of meters ) .
     // the two floats after it are the padding : the HLSL constant buffer is rounded to 16 bytes , the size of the C++ structure is now 28 words = 112 bytes , the same
     float sssScale;
@@ -707,6 +709,8 @@ struct GeneralFeatures{
     uint32_t NKPDTrain;
     uint32_t ReSTIRSSS;
     uint32_t SHaRC;
+
+    uint32_t Tesselation;
 
     float sssScale;
     uint32_t bloomRequired;
@@ -887,12 +891,14 @@ namespace ms
 {
     // general data for meshlets
 
+    // SMALL meshlets for the tessellation : the LOD 4 makes 16 triangles and 15 vertices of every triangle . 12 triangles give 192 triangles and 180 vertices : it fits into the output of the mesh shader ( 192 and 192 , see MESH_OUT_* in meshShader.hlsl ) and into its memory ( 32 KB ) .
+    // meshopt needs the number of the triangles to be a multiple of 4 . before the tessellation it was 124 and 64
 #ifdef __cplusplus
-    inline static constexpr uint32_t MAX_BOUND_TRIANGLE_COUNT = 124ul;
-    inline static constexpr uint32_t MAX_BOUND_VERTEX_COUNT = 64ul;
+    inline static constexpr uint32_t MAX_BOUND_TRIANGLE_COUNT = 12ul;
+    inline static constexpr uint32_t MAX_BOUND_VERTEX_COUNT = 32ul;
 #else
-    static const uint MAX_BOUND_TRIANGLE_COUNT = 124ul;
-    static const uint MAX_BOUND_VERTEX_COUNT = 64ul;
+    static const uint MAX_BOUND_TRIANGLE_COUNT = 12ul;
+    static const uint MAX_BOUND_VERTEX_COUNT = 32ul;
 #endif
 
     struct GeometryData

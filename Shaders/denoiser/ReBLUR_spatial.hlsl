@@ -1,4 +1,4 @@
-static const float MAX_ACCUM_FRAMES = 32.0f;
+static const float MAX_ACCUM_FRAMES = 64.0f;
 static const float MAX_RADIUS_PIXELS = 32.0f;
 static const float MAX_HIT_DISTANCE = 50.0f;
 static const float DEPTH_SIGMA = 8.0f;

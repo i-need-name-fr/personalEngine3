@@ -161,17 +161,7 @@ void main(uint3 id : SV_DispatchThreadID)
     float3 diffuse = diffuseImage[id.xy].xyz;
     float3 indirectSignal = upsampleIndirect(id.xy);
 
-    if(features.NKPD)
-    {
-        AI::NKPD::NKPDOptimal info = AI::NKPD::buildNKPDInfo(id.xy , false);
-        float count = 0.0f;
-
-        diffuse = AI::NKPD::askNKPD(info , count);
-        const float diffuseCount = info.validUV ? min(count + 1.0f , AI::NKPD::MAX_ACCUM_FRAMES) : 1.0f;
-
-        diffuseImage[id.xy] = float4(diffuse , 1.0f);
-        diffuseHistoryImage[id.xy] = float4(diffuseCount , diffuseHistoryImage[id.xy].g , 0.0f , 0.0f);
-    }
+    // the diffuse light is denoised by the passes of NKPD before this shader ( inferenceDiffuse ) : diffuseImage already has the result
 
     const float3 specular = specularImage[id.xy].xyz;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);

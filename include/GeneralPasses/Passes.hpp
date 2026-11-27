@@ -46,3 +46,4 @@
 #include "RayTracingIndirect.hpp"
 #include "PathTracingIndirect.hpp"
 #include "NKPDInference.hpp"
+#include "NKPDInferenceDiffuse.hpp"

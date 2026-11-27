@@ -148,6 +148,7 @@ namespace mox
             nkpdb = nullptr;
             nkpdbi = nullptr;
             nkpdi = nullptr;
+            nkpdd = nullptr;
             nkpdp1 = nullptr;
             nkpdp2 = nullptr;
             nkpdp3 = nullptr;
@@ -665,6 +666,14 @@ namespace mox
                 }
 
                 {
+                    // NKPD of the diffuse light : its own passes ( the full resolution ) before PostProcess
+                    Passes::NKPDInferenceDiffuse::CreateInfo info{};
+                    info.context = ctx;
+                    info.path_S = "../Shaders/NKPD/inferenceDiffuse";
+                    nkpdd = std::make_shared<Passes::NKPDInferenceDiffuse>(info);
+                }
+
+                {
                     Passes::NKPDApply1::CreateInfo info{};
                     info.context = ctx;
                     info.path_S = "../Shaders/NKPD/applyInput";
@@ -714,7 +723,7 @@ namespace mox
                         reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
-                        relaxt.get() , relaxs.get() , nkpdi.get() ,
+                        relaxt.get() , relaxs.get() , nkpdd.get() , nkpdi.get() ,
                         // DLSS ( or the copy ) right after PostProcess : HDRAE and HDR read DLSSImage
                         volumentric.get() , pProcess.get() , dlssPass.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
@@ -744,7 +753,7 @@ namespace mox
                         reblurt.get() , reblurs.get() , nkpdt.get() , nkpdb.get() ,
                         reblurt_indirect.get() , reblurs_indirect.get() , nkpdbi.get() ,
                         nkpdp1.get() , nkpdp2.get() , nkpdp3.get() ,
-                        relaxt.get() , relaxs.get() , nkpdi.get() ,
+                        relaxt.get() , relaxs.get() , nkpdd.get() , nkpdi.get() ,
                         volumentric.get() , pProcess.get() , dlssPass.get() , hdrae.get() , evUpdate.get() , hdr.get() , guiPass.get()
                     };
 
@@ -899,6 +908,7 @@ namespace mox
             featureSettings.maxEV = 6.0f;
             featureSettings.minEV = -6.0f;
 
+            featureSettings.Tesselation = false;
 
             bloomData = BloomInfo{};
             bloomData.threhold = 1.0f;
@@ -1195,7 +1205,13 @@ namespace mox
                 gui::SliderFloat("high Count" , &info.highCount , 0.0f , 1.0f);
                 gui::Spacing();
                 gui::Separator();
+            }   
+
+            if(gui::Button(info.Tesselation ? "Tesselation ON" : "Tesselation OFF")){
+                info.Tesselation = !info.Tesselation;
             }
+            gui::Spacing();
+            gui::Separator();
 
             // AO
             gui::BeginDisabled(false);
@@ -1581,6 +1597,7 @@ namespace mox
         Passes::pNKPDBack<0> nkpdb{};
         Passes::pNKPDBack<1> nkpdbi{};
         Passes::pNKPDInference nkpdi{};
+        Passes::pNKPDInferenceDiffuse nkpdd{};
         Passes::pNKPDApply1 nkpdp1{};
         Passes::pNKPDApply2 nkpdp2{};
         Passes::pNKPDApply3 nkpdp3{};

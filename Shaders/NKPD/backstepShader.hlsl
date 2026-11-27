@@ -14,6 +14,7 @@ using namespace AI::NKPD;
 
 [[vk::push_constant]] struct {
     uint indirect;
+    uint stepSize;
 } push;
 
 [shader("compute")]
@@ -39,7 +40,6 @@ void main(uint3 id : SV_DispatchThreadID)
     {
         InterlockedAdd(NKPDGeneral[0].validCount , 1);
     }
-
-    processBackStep(ideal , info , valid);
-
+    float3 result;
+    processBackStep(ideal , info , valid , result , push.stepSize);
 }
