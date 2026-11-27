@@ -9,7 +9,7 @@ namespace NKPD
 {
 [[vk::binding(  0   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<AI::NKPD::GeneralData> NKPDGeneral;
 
-// the input layer : 256 -> 64 ( 16 neighbours x 16 numbers )
+// the net : 272 -> 128 -> 128 -> 16 . the input layer : 272 -> 128 ( 16 neighbours x 16 numbers + 16 numbers of the centre )
 [[vk::binding(  1   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> inputGradBuffer;
 [[vk::binding(  2   ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> inputWeightBuffer;
 [[vk::binding(  3   ,   MOX_NKPD_INCLUDED    )]] ConstantBuffer<AI::OffsetData> inputOffsetBuffer;
@@ -35,10 +35,10 @@ namespace NKPD
 [[vk::binding(  19  ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<float> outputStagingWeightBuffer;
 [[vk::binding(  20  ,   MOX_NKPD_INCLUDED    )]] ConstantBuffer<AI::ptrData> outputPtrBuffer;
 [[vk::binding(  21  ,   MOX_NKPD_INCLUDED    )]] RWStructuredBuffer<AI::Parameter> outputParamBuffer;
-[[vk::image_format("rg32f")]]
-[[vk::binding(  22  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float2> variancePool;       // the current frame ( ping pong : variancePool_[frameIndex % 2] )
-[[vk::image_format("rg32f")]]
-[[vk::binding(  23  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float2> prevVariancePool;   // the previous frame
+[[vk::image_format("rgba32f")]]
+[[vk::binding(  22  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float4> variancePool;       // the current frame ( ping pong : variancePool_[frameIndex % 2] )
+[[vk::image_format("rgba32f")]]
+[[vk::binding(  23  ,   MOX_NKPD_INCLUDED    )]] RWTexture2D<float4> prevVariancePool;   // the previous frame
 
 struct NKPDOptimal
 {
@@ -99,6 +99,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     static const uint32_t PIXEL_COUNT = 16;
     // the numbers of ONE neighbour ( FEATURE_COUNT = 16 ) : nInput 3 , prevInput 3 , normalW , depthW , hit , colorDiff 3 , and 4 free slots ( 12 .. 15 ) , they are 0 for now
     static const uint FEATURE_COUNT = 16;
+    static const uint CONTEXT_COUNT = 16;                                          // the numbers of the CENTRE pixel : one block after the 16 neighbours
+    static const uint DATA_COUNT = FEATURE_COUNT * PIXEL_COUNT + CONTEXT_COUNT;     // 272
     // the length of the history ( the counter and 1 / alpha of the temporal part ) : the same as the temporal pass of ReBLUR
     static const float MAX_ACCUM_FRAMES = 64.0f;
     static const float NKPD_VARIANCE_LUM_MAX = 64.0f;
@@ -174,14 +176,26 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         return diffuseDistance[p];
     }
 
+    static const float NKPD_TRAINING_HISTORY_MIN = 1.0f;
+    static const float NKPD_TRAINING_HISTORY_MAX = 64.0f;
+
     float readHistoryCount(const uint2 p , const bool useIndirect)
     {
-        if(useIndirect) return diffuseHistoryImage[p].g;
-        return diffuseHistoryImage[p].r;
+#if defined(NKPD_TRAINING)
+        uint seed = initSeed(p , generalBuffer.frameIndex + (useIndirect ? 17u : 0u));
+        const float logMin = log2(NKPD_TRAINING_HISTORY_MIN);
+        const float logMax = log2(NKPD_TRAINING_HISTORY_MAX + 1.0f);
+        return min(floor(exp2(lerp(logMin , logMax , rand(seed)))) , NKPD_TRAINING_HISTORY_MAX);   // 1 .. 64
+#else
+        // the count of the history of the PREVIOUS frame is in the ping pong pool ( z ) : the direct pixels are on the left , the indirect ones are shifted by the width of the direct image
+        uint2 q = p;
+        if(useIndirect) q.x += directSize().x;
+        return prevVariancePool[q].z;
+#endif
     }
 
-    static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
-    static const float DISOCCLUSION_RELATIVE = 0.02f;
+    static const float DISOCCLUSION_MIN_DISTANCE = 0.1f;
+    static const float DISOCCLUSION_RELATIVE = 0.04f;
 
     bool checkDisocclusion(const uint2 currentPixel , const uint2 prevPixel)
     {
@@ -217,18 +231,15 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     #define NKPD_H(k) ((float16_t)data[k])
     #define NKPD_ROW(b) NKPD_H((b) + 0) , NKPD_H((b) + 1) , NKPD_H((b) + 2) , NKPD_H((b) + 3) , NKPD_H((b) + 4) , NKPD_H((b) + 5) , NKPD_H((b) + 6) , NKPD_H((b) + 7) ,                     NKPD_H((b) + 8) , NKPD_H((b) + 9) , NKPD_H((b) + 10) , NKPD_H((b) + 11) , NKPD_H((b) + 12) , NKPD_H((b) + 13) , NKPD_H((b) + 14) , NKPD_H((b) + 15)
-    Coop256 makeFirstLayerVector(const float data[FEATURE_COUNT * PIXEL_COUNT])
+    Coop272 makeFirstLayerVector(const float data[DATA_COUNT])
     {
-        return coop::construct256(NKPD_ROW(0) , NKPD_ROW(16) , NKPD_ROW(32) , NKPD_ROW(48) , NKPD_ROW(64) , NKPD_ROW(80) ,
+        return coop::construct272(NKPD_ROW(0) , NKPD_ROW(16) , NKPD_ROW(32) , NKPD_ROW(48) , NKPD_ROW(64) , NKPD_ROW(80) ,
                                   NKPD_ROW(96) , NKPD_ROW(112) , NKPD_ROW(128) , NKPD_ROW(144) , NKPD_ROW(160) , NKPD_ROW(176) ,
-                                  NKPD_ROW(192) , NKPD_ROW(208) , NKPD_ROW(224) , NKPD_ROW(240));
+                                  NKPD_ROW(192) , NKPD_ROW(208) , NKPD_ROW(224) , NKPD_ROW(240) , NKPD_ROW(256));
     }
     #undef NKPD_ROW
     #undef NKPD_H
 
-    // the SYNTHETIC MOTION of the training ( only in the backstep shader : NKPD_TRAINING ) : the camera stands while the net is trained , so the net would never see a moving picture ( motionW = 0 , no disocclusion ) .
-    // the ground truth stays in our pixel , but the "previous" frame is read from a pixel that is shifted by this jitter ( one shift for the whole frame , the same as a turn of the camera ) .
-    // the inference : no jitter . it depends only on frameIndex , so every call in one frame gets the same shift
     float2 trainingJitterUV()
     {
 #if defined(NKPD_TRAINING)
@@ -241,8 +252,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         float magnitude = 0.0f;
         if(chance > 0.3f)                                   // 30% of the frames have no motion : the static picture does not get forgotten
         {
-            magnitude = r * r * 4.0f;                       // 0 .. 4 pixels , mostly small
-            if(big > 0.9f) magnitude = 4.0f + r * 12.0f;    // 10% : a fast turn ( 4 .. 16 pixels ) , there are the disocclusions
+            magnitude = r * r * 8.0f;                       // 0 .. 8 pixels , mostly small
+            if(big > 0.9f) magnitude = 8.0f + r * 24.0f;    // 10% : a fast turn ( 8 .. 32 pixels ) , there are the disocclusions
         }
 
         return float2(cos(angle) , sin(angle)) * magnitude / float2(directSize());
@@ -251,7 +262,26 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 #endif
     }
 
-    void fillFirstLayerVector(NKPDOptimal info , out float weights[PIXEL_COUNT] , out Coop256 firstLayerVector , out float3 radiances[PIXEL_COUNT])
+    // the HDR signal for the INPUT of the net : the difference between a dark and a very bright pixel can be 1000 and more . log2( 1 + x ) / 16 : 0 -> 0 , 1 -> 0.06 , 100 -> 0.42 , 60000 ( the cut ) -> 1 .
+    // only the features are compressed : radiances[] ( what the net mixes ) stay linear
+    float3 compressHDR(const float3 x)
+    {
+        return log2(1.0f + max(x , 0.0f)) * (1.0f / 16.0f);
+    }
+
+    float compressHDR(const float x)
+    {
+        return log2(1.0f + max(x , 0.0f)) * (1.0f / 16.0f);
+    }
+
+    float relMSE(const float3 a , const float3 ref)
+    {
+        const float3 d = a - ref;
+        const float l = luminance(ref);
+        return dot(d , d) / (l * l + 0.01f);
+    }
+
+    void fillFirstLayerVector(NKPDOptimal info , out float weights[PIXEL_COUNT] , out Coop272 firstLayerVector , out float3 radiances[PIXEL_COUNT])
     {
         uint2 id = info.currentCoord;
         uint2 pid = info.prevCoord;
@@ -276,7 +306,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         }
 
         const float3 center = readInput(id , info.useIndirect);
-        const float history = readHistoryCount(id , info.useIndirect);
+        const float history = readHistoryCount(pid , info.useIndirect);
         const uint2 gId = gPixel(id , info.useIndirect);
         const float3 cN = normalImage[gId].xyz;
         const float cD = depthImage[gId];
@@ -298,16 +328,16 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const float centerLum = luminance(centerAccumulated);
         const float centerDeviation = info.validUV ? abs(luminance(center) - luminance(centerPrev)) : 0.5f * luminance(center);
 
-        {
-            const float centerVarLum = min(luminance(center) , NKPD_VARIANCE_LUM_MAX);
-            const float2 centerCur = float2(centerVarLum , centerVarLum * centerVarLum);
-            const float2 centerPrevMoments = info.validUV ? prevVariancePool[prevVariancePixel] : centerCur;
-            const float centerMomentAlpha = info.validUV ? max(1.0f / (history + 1.0f) , 1.0f / MAX_ACCUM_FRAMES) : 1.0f;
-            variancePool[variancePixel] = lerp(centerPrevMoments , centerCur , centerMomentAlpha);
-        }
+        const float centerHitNormalized = saturate(log2(1.0f + distance) / log2(1.0f + MAX_HIT_DISTANCE));
+        const float centerVarLum = min(luminance(center) , NKPD_VARIANCE_LUM_MAX);
+        const float2 centerCur = float2(centerVarLum , centerVarLum * centerVarLum);
+        const float2 centerPrevMoments = info.validUV ? prevVariancePool[prevVariancePixel].xy : centerCur;
+        const float centerMomentAlpha = info.validUV ? max(1.0f / (history + 1.0f) , 1.0f / MAX_ACCUM_FRAMES) : 1.0f;
+        const float2 centerMoments = lerp(centerPrevMoments , centerCur , centerMomentAlpha);
+        variancePool[variancePixel] = float4(centerMoments , info.validUV ? min(history + 1.0f , MAX_ACCUM_FRAMES) : 1.0f , 0.0f);
 
         static const uint stride = FEATURE_COUNT;
-        float data[FEATURE_COUNT * PIXEL_COUNT] = (float[FEATURE_COUNT * PIXEL_COUNT])0;
+        float data[DATA_COUNT] = (float[DATA_COUNT])0;
 
         uint patternSeed = initSeed(id.xy , generalBuffer.frameIndex);
         const float patternAngle = rand(patternSeed) * 2.0f * PI;
@@ -345,7 +375,6 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
                 continue;
             }
 
-            // the G buffer of the neighbour : the pixel of the G buffer that THAT pixel of the grid looks at
             const uint2 gS = gPixel(uint2(samplePos) , info.useIndirect);
 
             if(pixelCheck[gS] != COLOR_PIXEL)        
@@ -418,7 +447,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
             const float varLumIn = min(luminance(nInput) , NKPD_VARIANCE_LUM_MAX);   // the cut : no fireflies , lum^2 is far from the float limit
             const float2 curMoments = float2(varLumIn , varLumIn * varLumIn);
-            const float2 prevMoments = nValid ? prevVariancePool[nPrevVariancePixel] : curMoments;
+            const float2 prevMoments = nValid ? prevVariancePool[nPrevVariancePixel].xy : curMoments;
             const float momentAlpha = nValid ? max(1.0f / (pHistory + 1.0f) , 1.0f / MAX_ACCUM_FRAMES) : 1.0f;   // 1 / ( count + 1 ) , not lower than 1 / MAX_ACCUM_FRAMES
             const float2 newMoments = lerp(prevMoments , curMoments , momentAlpha);
             const float finalVar = max(newMoments.y - newMoments.x * newMoments.x , 0.0f);
@@ -433,24 +462,27 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             float normalW = pow(saturate(dot(sNormal , cN)) , NORMAL_POWER);
 
             const float hit = readHitDistance(samplePos , info.useIndirect);
+            const float hitNormalized = saturate(log2(1.0f + min(hit , MAX_HIT_DISTANCE)) / log2(1.0f + MAX_HIT_DISTANCE));   // 0..1 , the log scale : the near hits ( the contact shadows ) matter more than the far ones
 
             const float relativeDeviation = min(nDeviation / ((nValid ? nPrevLum : nRawLum) + 0.01f) , 4.0f) * 0.25f;
             const float zScore = min(abs(luminance(nInput) - centerLum) / (nDeviation + centerDeviation + 0.05f * centerLum + 0.01f) , 8.0f) * 0.125f;
 
             weights[i] = (abs(cD - sDepth) / cD > NKPD_DEPTH_CUTOFF) ? 0.0f : depthW * normalW;
-            data[i * stride] = nInput.x;
-            data[i * stride + 1] = nInput.y;
-            data[i * stride + 2] = nInput.z;
-            data[i * stride + 3] = prevInput.x;
-            data[i * stride + 4] = prevInput.y;
-            data[i * stride + 5] = prevInput.z;
+            const float3 nCompressed = compressHDR(nInput);
+            const float3 pCompressed = compressHDR(prevInput);
+            data[i * stride] = nCompressed.x;
+            data[i * stride + 1] = nCompressed.y;
+            data[i * stride + 2] = nCompressed.z;
+            data[i * stride + 3] = pCompressed.x;
+            data[i * stride + 4] = pCompressed.y;
+            data[i * stride + 5] = pCompressed.z;
             data[i * stride + 6] = normalW;
-            data[i * stride + 7] =  nValid ? min(pHistory + 1.0f , MAX_ACCUM_FRAMES) / MAX_ACCUM_FRAMES : 0.0f;
-            data[i * stride + 8] = saturate(log2(1.0f + min(hit , MAX_HIT_DISTANCE)) / log2(1.0f + MAX_HIT_DISTANCE));   // 0..1 , the log scale : the near hits ( the contact shadows ) matter more than the far ones
+            data[i * stride + 7] = 0.5f + 0.5f * turned.x;   // where the neighbour stands : the offset from the centre in the units of the radius ( the pattern is turned randomly , the number of the slot does not tell it ) , -1 .. 1 -> 0 .. 1
+            data[i * stride + 8] = hitNormalized;   // 0..1 , the log scale : the near hits ( the contact shadows ) matter more than the far ones
             data[i * stride + 9] = (nLum - centerLum) / (nLum + centerLum + 0.01f);
             data[i * stride + 10] = saturate(dot(sNormal , cN));   // the raw dot of the normals ( normalW is almost binary ) : the curvature of the surface
-            data[i * stride + 11] = saturate(abs(dot(positionImage[gS].xyz - cP , cN)) / cD * 8.0f);   // the distance to the plane of the centre , relative to the depth , 0..1
-            data[i * stride + 12] = log2(1.0f + motionW) / log2(1.0f + 16.0f);   // the motion in pixels : the log scale , 0 .. 1 ( 16 pixels is the biggest synthetic jitter of the training , the faster motion goes a bit over 1 )
+            data[i * stride + 11] = 0.5f + 0.5f * turned.y;
+            data[i * stride + 12] = saturate(0.5f + 0.5f * (hitNormalized - centerHitNormalized));   // the difference of the hit distance with the centre : the border of a shadow ( 0.5 = the same , lower = closer )
             data[i * stride + 13] = saturate(sqrt(finalVar) / (newMoments.x + 0.01f) * 0.25f);   // the relative standard deviation of the luminance , 0..1 ( the same scale as relDev )
             data[i * stride + 14] = relativeDeviation;
             data[i * stride + 15] = zScore;
@@ -458,12 +490,36 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
             radiances[i] = nInput;
         }
 
+        {
+            const uint c0 = FEATURE_COUNT * PIXEL_COUNT;
+            const float cLum = luminance(center);
+            const float pLum = luminance(centerPrev);
+            const float3 toView = normalize(generalBuffer.playerPosition - cP);
+
+            data[c0 + 0] = compressHDR(center.x);                                      // the input of the centre ( the raw signal , the log scale )
+            data[c0 + 1] = compressHDR(center.y);
+            data[c0 + 2] = compressHDR(center.z);
+            data[c0 + 3] = compressHDR(centerPrev.x);                                  // the previous signal
+            data[c0 + 4] = compressHDR(centerPrev.y);
+            data[c0 + 5] = compressHDR(centerPrev.z);
+            data[c0 + 6] = compressHDR(pLum);
+            data[c0 + 7] = saturate(log2(1.0f + distance) / log2(1.0f + MAX_HIT_DISTANCE));   // the hit distance of the centre : the log scale , 0..1
+            data[c0 + 8] = log2(1.0f + motionW) / log2(1.0f + 32.0f);                  // the motion
+            data[c0 + 9] = info.validUV ? min(history + 1.0f , MAX_ACCUM_FRAMES) / MAX_ACCUM_FRAMES : 0.0f;   // the strength of the history
+            data[c0 + 10] = (cLum - pLum) / (cLum + pLum + 0.01f);                     // the difference of the luminance : the previous and this frame , -1 .. 1
+            data[c0 + 11] = saturate(min(relMSE(center , centerPrev) , 4.0f) * 0.25f); // the simple difference of the colours ( the relative MSE ) , 0..1
+            // the new ones
+            data[c0 + 12] = saturate(sqrt(max(centerMoments.y - centerMoments.x * centerMoments.x , 0.0f)) / (centerMoments.x + 0.01f) * 0.25f);   // the relative standard deviation of the centre ( the temporal noise )
+            data[c0 + 13] = saturate(dot(cN , toView));                                // the angle of the view : the grazing angles ( the cloth ) have another noise and disocclusions
+            data[c0 + 14] = saturate(log2(1.0f + centerLum) / log2(1.0f + 64.0f));     // the brightness of the centre ( the log scale ) : the net does not see the scale of the HDR otherwise
+            data[c0 + 15] = saturate(log2(1.0f + cD) / log2(1.0f + 100.0f));           // the distance to the camera ( the log scale ) : the noise and the pixel footprint depend on it
+        }
+
         firstLayerVector = makeFirstLayerVector(data);
     }
 
     // forward
 
-    // the raw output of the net for the neighbour i : a value that is not finite ( an overflow of fp16 ) is 0 , the rest is cut to +-20 ( sigmoid is flat there anyway ) . forward and backstep use the same function
     float rawOutput(const Coop16 o , const uint i)
     {
         const float raw = float(coop::extractDynamic(o , i));
@@ -471,20 +527,20 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
     }
 
     float3 forwardNKPD(NKPDOptimal info ,
-                    out Coop256 x , out Coop64 z1 , out Coop64 h1 , out Coop64 z2 , out Coop64 h2 ,
+                    out Coop272 x , out Coop128 z1 , out Coop128 h1 , out Coop128 z2 , out Coop128 h2 ,
                     out Coop16 o , out float weights[PIXEL_COUNT] , out float3 radiances[PIXEL_COUNT] ,
                     out float history)
     {
-        Coop256 input;
+        Coop272 input;
         fillFirstLayerVector(info , weights , input , radiances);
         x = input;
         const BufPtr pInputWeights = BufPtr(inputPtrBuffer.pWeightBuffer);
         const BufPtr pHiddenWeights = BufPtr(hiddenPtrBuffer.pWeightBuffer);
         const BufPtr pOutputWeights = BufPtr(outputPtrBuffer.pWeightBuffer);
 
-        Coop64 inputResult = coop::matMulAdd<Coop64>(input , NP_F16 , pInputWeights.Get().data , 0 , NP_F16,
+        Coop128 inputResult = coop::matMulAdd<Coop128>(input , NP_F16 , pInputWeights.Get().data , 0 , NP_F16,
                                                     pInputWeights.Get().data , int(inputOffsetBuffer.BIAS_OFFSET) , NP_F16,
-                                                    64 , 256 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 256 * 2 , 0);
+                                                    128 , 272 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 272 * 2 , 0);
 
 
         inputResult = coop::clampFinite(inputResult);
@@ -492,9 +548,9 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         inputResult = coop::leakyRelu(inputResult);
         h1 = inputResult;
 
-        Coop64 hiddenResult = coop::matMulAdd<Coop64>(inputResult , NP_F16 , pHiddenWeights.Get().data , 0 , NP_F16,
+        Coop128 hiddenResult = coop::matMulAdd<Coop128>(inputResult , NP_F16 , pHiddenWeights.Get().data , 0 , NP_F16,
                                                     pHiddenWeights.Get().data , int(hiddenOffsetBuffer.BIAS_OFFSET) , NP_F16,
-                                                    64 , 64 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 64 * 2 , 0);
+                                                    128 , 128 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 128 * 2 , 0);
 
         hiddenResult = coop::clampFinite(hiddenResult);
         z2 = hiddenResult;
@@ -503,7 +559,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
         Coop16 outputResult = coop::matMulAdd<Coop16>(hiddenResult , NP_F16 , pOutputWeights.Get().data , 0 , NP_F16,
                                                     pOutputWeights.Get().data , int(outputOffsetBuffer.BIAS_OFFSET) , NP_F16,
-                                                    16 , 64 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 64 * 2 , 0);
+                                                    16 , 128 , NP_LAYOUT_INFERENCING_OPTIMAL , false , 128 * 2 , 0);
 
         outputResult = coop::clampFinite(outputResult);
         o = outputResult;
@@ -521,7 +577,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         uint2 id = info.currentCoord;
         uint2 pid = info.prevCoord;
         const float3 center = readInput(id , info.useIndirect);
-        history = readHistoryCount(id , info.useIndirect);
+        history = readHistoryCount(pid , info.useIndirect);   // the reprojected pixel , see fillFirstLayerVector
         // the signal of the LAST frame ( not the current one ) at the reprojected pixel
         const float3 prev = readPrevInput(pid , info.useIndirect);
         float alpha = 1.0f;
@@ -585,7 +641,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     float3 askNKPD(NKPDOptimal info , out float history)
     {
-        Coop256 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
+        Coop272 x ; Coop128 z1 ; Coop128 h1 ; Coop128 z2 ; Coop128 h2 ;
         Coop16 o ;
         float weights[PIXEL_COUNT];
         float3 radiances[PIXEL_COUNT];
@@ -597,7 +653,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
 
     void processBackStep(const float3 ideal , NKPDOptimal info , const bool valid)
     {
-        Coop256 x ; Coop64 z1 ; Coop64 h1 ; Coop64 z2 ; Coop64 h2 ;
+        Coop272 x ; Coop128 z1 ; Coop128 h1 ; Coop128 z2 ; Coop128 h2 ;
         Coop16 o ;
         float weights[PIXEL_COUNT];
         float3 radiances[PIXEL_COUNT];
@@ -638,18 +694,18 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const BufPtr pHiddenGrads = BufPtr(hiddenPtrBuffer.pGradBuffer);
         const BufPtr pOutputGrads = BufPtr(outputPtrBuffer.pGradBuffer);
 
-        coop::outerProduct(pOutputGrads.Get().data , 0 , inversedCoop , h2 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 64 * 2);
+        coop::outerProduct(pOutputGrads.Get().data , 0 , inversedCoop , h2 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 128 * 2);
 
 
-        Coop64 layer2 = coop::matMul<Coop64>(inversedCoop , NP_F16 , pOutputWeights.Get().data , int(outputOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 64 , 16 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 64 * 2 , 0);
-        Coop64 gate2 = coop::leakyReluGate(z2);
-        Coop64 dz2 = coop::mul(layer2 , gate2);
-        coop::outerProduct(pHiddenGrads.Get().data , 0 , dz2 , h1 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 64 * 2);
+        Coop128 layer2 = coop::matMul<Coop128>(inversedCoop , NP_F16 , pOutputWeights.Get().data , int(outputOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 128 , 16 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 128 * 2 , 0);
+        Coop128 gate2 = coop::leakyReluGate(z2);
+        Coop128 dz2 = coop::mul(layer2 , gate2);
+        coop::outerProduct(pHiddenGrads.Get().data , 0 , dz2 , h1 , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 128 * 2);
 
-        Coop64 layer1 = coop::matMul<Coop64>(dz2 , NP_F16 , pHiddenWeights.Get().data , int(hiddenOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 64 , 64 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 64 * 2 , 0);
-        Coop64 gate1 = coop::leakyReluGate(z1);
-        Coop64 dz1 = coop::mul(layer1 , gate1);
-        coop::outerProduct(pInputGrads.Get().data , 0 , dz1 , x , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 256 * 2);
+        Coop128 layer1 = coop::matMul<Coop128>(dz2 , NP_F16 , pHiddenWeights.Get().data , int(hiddenOffsetBuffer.TRAINING_W_OFFSET), NP_F16 , 128 , 128 ,  NP_LAYOUT_TRAINING_OPTIMAL , true , 128 * 2 , 0);
+        Coop128 gate1 = coop::leakyReluGate(z1);
+        Coop128 dz1 = coop::mul(layer1 , gate1);
+        coop::outerProduct(pInputGrads.Get().data , 0 , dz1 , x , NP_LAYOUT_TRAINING_OPTIMAL , NP_F16 , 272 * 2);
 
         coop::reduceSum(pOutputGrads.Get().data , outputOffsetBuffer.BIAS_GRAD_OFFSET , inversedCoop);
         coop::reduceSum(pHiddenGrads.Get().data , hiddenOffsetBuffer.BIAS_GRAD_OFFSET , dz2);
@@ -666,8 +722,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint validCount = NKPDGeneral[0].validCount;
         if(validCount == 0) return;
         const uint pos = id.x;
-        static const uint matrixSize = 64 * 256;
-        const uint totalSize = matrixSize + 64;
+        static const uint matrixSize = 128 * 272;
+        const uint totalSize = matrixSize + 128;
         if(pos >= totalSize) return;
         float g = 0.0f;
 
@@ -706,8 +762,8 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint validCount = NKPDGeneral[0].validCount;
         if(validCount == 0) return;
         const uint pos = id.x;
-        static const uint matrixSize = 64 * 64;
-        const uint totalSize = matrixSize + 64;
+        static const uint matrixSize = 128 * 128;
+        const uint totalSize = matrixSize + 128;
         if(pos >= totalSize) return;
         float g = 0.0f;
 
@@ -745,7 +801,7 @@ static const int NP_LAYOUT_TRAINING_OPTIMAL = 3;
         const uint validCount = NKPDGeneral[0].validCount;
         if(validCount == 0) return;
         const uint pos = id.x;
-        static const uint matrixSize = 16 * 64;
+        static const uint matrixSize = 16 * 128;
         const uint totalSize = matrixSize + 16;
         if(pos >= totalSize) return;
         float g = 0.0f;

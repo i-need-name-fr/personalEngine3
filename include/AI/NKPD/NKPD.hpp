@@ -68,9 +68,9 @@ namespace AI
             }
         }
 
-        Buffer::pNeuralBuffer<64 , 256 , "NKPD_input_Layer"> inputLayer;
-        Buffer::pNeuralBuffer<64 , 64 , "NKPD_hidden_layer"> hiddenLayer;
-        Buffer::pNeuralBuffer<16 , 64 ,"NKPD_output_layer"> outputLayer;
+        Buffer::pNeuralBuffer<128 , 272 , "NKPD_input_Layer"> inputLayer;
+        Buffer::pNeuralBuffer<128 , 128 , "NKPD_hidden_layer"> hiddenLayer;
+        Buffer::pNeuralBuffer<16 , 128 ,"NKPD_output_layer"> outputLayer;
 
         Buffer::pDeviceReadableBuffer NKPDGeneral{};
         std::array<Image::pRenderImage2 , 2> variancePool{}; // ping pong : [frameIndex % 2] is the current , the other one is the previous
@@ -168,33 +168,33 @@ namespace AI
             {
                 // needsToWriteFile : the weights are written to the file when the net is destroyed , the same as NRC
                 {
-                    Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">::CreateInfo info{};
+                    Buffer::NeuralBuffer<128 , 272 , "NKPD_input_Layer">::CreateInfo info{};
                     info.context = context;
                     info.needsToWriteFile = true;
 
-                    inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 256 , "NKPD_input_Layer">>(info);
+                    inputLayer = std::make_shared<Buffer::NeuralBuffer<128 , 272 , "NKPD_input_Layer">>(info);
                 }
 
                 {
-                    Buffer::NeuralBuffer<64 , 64 , "NKPD_hidden_layer">::CreateInfo info{};
+                    Buffer::NeuralBuffer<128 , 128 , "NKPD_hidden_layer">::CreateInfo info{};
                     info.context = context;
                     info.needsToWriteFile = true;
 
-                    hiddenLayer = std::make_shared<Buffer::NeuralBuffer<64 , 64 , "NKPD_hidden_layer">>(info);
+                    hiddenLayer = std::make_shared<Buffer::NeuralBuffer<128 , 128 , "NKPD_hidden_layer">>(info);
                 }
 
                 {
-                    Buffer::NeuralBuffer<16 , 64 , "NKPD_output_layer">::CreateInfo info{};
+                    Buffer::NeuralBuffer<16 , 128 , "NKPD_output_layer">::CreateInfo info{};
                     info.context = context;
                     info.needsToWriteFile = true;
 
-                    outputLayer = std::make_shared<Buffer::NeuralBuffer<16 , 64 , "NKPD_output_layer">>(info);
+                    outputLayer = std::make_shared<Buffer::NeuralBuffer<16 , 128 , "NKPD_output_layer">>(info);
                 }
 
                 {
                     Image::RenderImage2::CreateInfo info{};
                     info.context = context;
-                    info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
+                    info.imageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;   // x , y : the moments of the luminance , z : the count of the history ( ping pong : no race of the read and the write )
                     info.imageType = VK_IMAGE_TYPE_2D;
                     info.imageUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
                     info.clear.float32[0] = 0.0f;

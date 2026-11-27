@@ -790,6 +790,10 @@ namespace mox
                 generalSettings.trainingIndex = 0;
             }
 
+            // the ground truth of the NKPD : the mean of the raw frames while the camera stands
+            if(features.NKPDTrain && generalSettings.prevViewProj == generalSettings.viewProj) trainingFrames++;
+            else trainingFrames = 0u;
+
             features.ReBLUR = data.ReBLUR;
             features.ReLAX = data.ReLAX;
 
@@ -807,6 +811,9 @@ namespace mox
                     warming = true;
                 }
 
+                // the truth is not clean yet ( too few frames in the mean ) , or the camera moves : no steps
+                if(features.NKPDTrain && trainingFrames < MOX_TRAINING_WARMUP_FRAMES + MOX_TRAINING_MIN_FRAMES) warming = true;
+
                 if(warming)
                 {
                     uploadedFeatures.NKPDTrain = 0u;
@@ -814,7 +821,7 @@ namespace mox
                     uploadedData.ReBLUR = 1u;
                 }
             }
-            uploadedData.trainingIndex = generalSettings.trainingIndex;
+            uploadedData.trainingIndex = (features.NKPDTrain && trainingFrames > MOX_TRAINING_WARMUP_FRAMES) ? trainingFrames : 0u;   // ReBLUR : the accumulation of the ground truth ( the frames )
 
             sl::Constants slData = context->convertToConstants(data);
             static uint8_t reset = true;
@@ -1593,6 +1600,8 @@ namespace mox
         BloomInfo bloomData{};
         // the warm up of the NKPD training ( see update ) : the countdown ( seconds ) , is the history of ReBLUR still to be given its weight in the first frame of the training
         float nkpdTrainingTimer{MOX_TRAINING_START};
+        // the frames of the accumulation of the ground truth : the training is on and the camera stands . 0 when the camera moves or the training is off
+        uint32_t trainingFrames{0u};
         glm::vec3 fogTint{0.35f , 0.45f , 0.60f};
         float fogGlow{0.25f};
         uint32_t requiredMode = RasterizationRequired;

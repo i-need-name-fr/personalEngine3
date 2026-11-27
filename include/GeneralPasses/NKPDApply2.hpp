@@ -57,7 +57,7 @@ namespace Passes
             VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
 
             cmdBindShadersEXT(cmd , 1 , stage , shaders);
-            const uint32_t x = (64 * 64  + 64 + 127) / 128;
+            const uint32_t x = (128 * 128  + 128 + 127) / 128;
             vkCmdDispatch(cmd , x , 1 , 1);
 
             shaders[0] = nullptr;

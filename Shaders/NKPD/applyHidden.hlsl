@@ -11,7 +11,7 @@ using namespace AI::NKPD;
 
 // the OPTIMIZER ( Adam ) of the hidden layer : id.x is the number of the parameter ( the matrix first , then the bias ) .
 // the matrix is updated in the row major fp32 staging buffer ( the host converts it into the optimal layouts after the passes ) , the bias goes to the weight buffer as fp16
-// the dispatch : x = ( 64 * 64 + 64 = 4160 + 127 ) / 128 = 33 groups , y = z = 1
+// the dispatch : x = ( 128 * 128 + 128 = 16512 + 127 ) / 128 = 130 groups , y = z = 1
 [shader("compute")]
 [numthreads(128 , 1 , 1)]
 void main(uint3 id : SV_DispatchThreadID)

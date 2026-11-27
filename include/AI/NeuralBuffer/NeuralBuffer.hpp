@@ -360,7 +360,8 @@ namespace Buffer
                 {
                     const auto weightData = _implReadFile(weightFile);
                     const auto paramsData = _implReadFile(paramsFile);
-                    if(!weightData.empty() && !paramsData.empty())
+                    // a file of ANOTHER size ( the net was changed : the number of neurons ) is not used : the copy would go over the end of the buffer
+                    if(!weightData.empty() && !paramsData.empty() && paramsData.size() == params.size() * sizeof(::AI::Parameter))
                     {
                         std::memcpy(params.data() , paramsData.data() , paramsData.size());
                         savedWeights = weightData;
@@ -412,6 +413,10 @@ namespace Buffer
 
             // weightBuffer : [ INFERENCE matrix ][ bias ][ TRAINING matrix ] , gradsBuffer : [ TRAINING matrix ][ bias gradient ] . all the offsets are aligned
             const VkDeviceSize weightBufferSize = _implAlignUp(offsets.TRAINING_W_OFFSET + weightsTRAINING);
+
+            // the file of the weights has to be exactly of this size , otherwise both files are from another net : the random start
+            const bool useSavedWeights = !savedWeights.empty() && savedWeights.size() == weightBufferSize;
+            if(!savedWeights.empty() && !useSavedWeights) _implFillRandom(input , params);
             const VkDeviceSize gradBufferSize = _implAlignUp(offsets.BIAS_GRAD_OFFSET + biasSize);
 
             // the start weight buffer : the bias is already inside ( fp16 ) , the matrices are written by the conversion at the end of this function
@@ -423,7 +428,7 @@ namespace Buffer
             }
 
             // start from the file : the whole content of the weight buffer ( the layouts of the driver and the bias )
-            const bool fromFile = !savedWeights.empty();
+            const bool fromFile = useSavedWeights;
             if(fromFile) std::memcpy(startWeightBuffer.data() , savedWeights.data() , savedWeights.size());
 
             std::vector<uint8_t> zeroGradBuffer(gradBufferSize , 0);

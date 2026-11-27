@@ -30,8 +30,8 @@ float readHistoryCount(uint2 p)
     return diffuseHistoryImage[p].r;
 }
 
-static const float DISOCCLUSION_MIN_DISTANCE = 0.05f;
-static const float DISOCCLUSION_RELATIVE = 0.02f;
+static const float DISOCCLUSION_MIN_DISTANCE = 0.1f;
+static const float DISOCCLUSION_RELATIVE = 0.04f;
 
 bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
 
@@ -49,7 +49,7 @@ bool checkDisocclusion(uint2 currentPixel , uint2 prevPixel){
     if(planeDistance > max(DISOCCLUSION_MIN_DISTANCE , viewDistance * DISOCCLUSION_RELATIVE)) return false;
 
     const float normalDot = dot(centerNormal , nNormal);
-    if(normalDot < 0.9f) return false;
+    if(normalDot < 0.7f) return false;
 
     return true;
 }
@@ -127,21 +127,19 @@ void main(uint3 id : SV_DispatchThreadID){
         history = currentSignal;
     }
 
-    float maxFrames = MAX_ACCUM_FRAMES;
     float realCount;
-    if(features.NKPDTrain && generalBuffer.trainingIndex > 0u)
+    if(generalBuffer.trainingIndex > 0u)
     {
-        realCount = min(pCount + 1.0f , maxFrames);
-        maxFrames = max(TRAIN_MAX_ACCUM_FRAMES , generalBuffer.trainingIndex + 1u);
-        pCount = generalBuffer.trainingIndex;
+        realCount = min(pCount + 1.0f , MAX_ACCUM_FRAMES);
+        pCount = min(realCount , float(generalBuffer.trainingIndex));
     }
     else
     {
-        pCount = min(pCount + 1.0f , maxFrames);
+        pCount = min(pCount + 1.0f , MAX_ACCUM_FRAMES);
         realCount = pCount;
     }
 
-    float alpha = 1.0f / pCount;
+    float alpha = (features.NKPD ? 0.0f :  1.0f / pCount);
     float3 accumulated = lerp(history , currentSignal , alpha);
     accumulated = clamp(accumulated , float3(0.0f , 0.0f , 0.0f) , float3(60000.0f , 60000.0f , 60000.0f));
     currentSignal = clamp(currentSignal , float3(0.0f , 0.0f , 0.0f) , float3(60000.0f , 60000.0f , 60000.0f));

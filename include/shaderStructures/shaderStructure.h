@@ -82,6 +82,14 @@ static const float PI = 3.14159265f;
 // at 0 the training starts and trainingIndex begins to count . when the training is switched off the countdown is set to this value again
 #define MOX_TRAINING_START 10.0f
 
+// the ground truth of the training is the MEAN of the raw frames since the start of the accumulation ( the camera stands , see trainingFrames in Core ) : 1 / N noise , no spatial blur .
+// the steps of the training begin only when the mean has at least so many frames ( before that the truth is too noisy )
+#define MOX_TRAINING_MIN_FRAMES 32u
+
+// the WARM UP of the accumulation : the first frames ( the camera stands , the training is on ) the picture is made by the ordinary ReBLUR ( it is smooth , the mean of the raw frames is still rough ) while trainingFrames goes on .
+// after them the accumulation of the ground truth goes on from the history of ReBLUR ( the count of the pixel ) , and the steps of the training begin MOX_TRAINING_MIN_FRAMES frames later
+#define MOX_TRAINING_WARMUP_FRAMES 64u
+
 #define SHADING_RATE_1x1 0    // без флагов = 1x1
 #define SHADING_RATE_1x2 1    // Vertical2Pixels
 #define SHADING_RATE_1x4 2    // Vertical4Pixels
@@ -251,7 +259,7 @@ struct GeneralInfo{
 
     uint32_t ReBLUR;
     uint32_t ReLAX;
-    uint32_t trainingIndex;
+    uint32_t trainingIndex;   // the shader gets here the number of the frames of the accumulation of the ground truth ( 0 : the ordinary ReBLUR ) , see trainingFrames in Core
 
     alignas(16) glm::mat4 cullView;
     alignas(16) glm::mat4 hizViewProj;

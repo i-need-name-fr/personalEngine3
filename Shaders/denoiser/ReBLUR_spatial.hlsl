@@ -15,8 +15,6 @@ static const float NORMAL_POWER = 128.0f;
     uint indirect;
 } push;
 
-// p is a pixel of the image that this pass denoises : of diffuseImage ( the full resolution ) or of indirectImage ( its own resolution ) .
-// the G buffer has the full resolution : the pixel of it that p looks at ( the indirect pixel looks at one pixel of its block , the jitter of the frame , the same as the indirect pass and the temporal pass use )
 uint2 gBufferPixel(const uint2 p)
 {
     if(push.indirect) return indirectToDirectPixel(p , indirectJitter(p , generalBuffer.frameIndex));
@@ -131,7 +129,7 @@ void main(uint3 id : SV_DispatchThreadID){
     }
     
     float3 result = sum / weight;
-    if(features.NKPDTrain)
+    if(features.NKPDTrain || generalBuffer.trainingIndex > 0u)
     {
         // result = lerp(center , result , saturate(relMSE(result , center)));
         result = center;
