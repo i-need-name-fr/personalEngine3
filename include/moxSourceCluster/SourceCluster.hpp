@@ -66,6 +66,27 @@ namespace mox
             return _implAskForBarrier(name , stage , access);
         }
 
+        MOX_NO_DISCARD ErrorDataOutput<std::any> requestRawSource(const std::string& name) noexcept
+        {
+            const auto it = sources.find(name);
+            if(it == sources.end())
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , std::format("failed to find the source in Source Cluster , name -> {}" , name));
+            }
+
+            return it->second;
+        }   
+
+        MOX_NO_DISCARD ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> requestBarrierType(const std::string& name) noexcept
+        {
+            return _implGetBarrierType(name);
+        }
+
+        const bool contains(const std::string name) const noexcept
+        {
+            return sources.contains(name);
+        }
+
         // FunctionType should be a std::function<> 
         template<typename FunctionType>
         ErrorDataOutput<FunctionType> requestFunction(const std::string name)
@@ -172,6 +193,61 @@ namespace mox
                     return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create barrier for BufferBase in SourceCluster , since the image is nullptr , name -> {}", name)});
                 }
                 const auto barrier = image->translateBuffer(access , stage);
+                return barrier;
+            }
+
+            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to creeate barrier for smth , due to SourceCluster containing undefined data , name -> {}", name)});
+        }
+
+        MOX_NO_DISCARD virtual ErrorDataOutput<std::variant<VkImageMemoryBarrier2 , VkBufferMemoryBarrier2>> _implGetBarrierType(const std::string& name) noexcept
+        {
+            // one lookup , and no copy of the std::any : the reference stays valid , since the map is not changed here
+            const auto it = sources.find(name);
+            if(it == sources.end()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Barrier for whatever this is , name -> {}" , name)});
+
+            const std::any& data = it->second;
+
+            if(data.type() == typeid(Image::RenderImage2*))
+            {
+                const auto image = std::any_cast<Image::RenderImage2*>(data);
+                if(!image)
+                {
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create barrier for RenderImage2 in SourceCluster , since the image is nullptr , name -> {}", name)});
+                }
+                VkImageMemoryBarrier2 barrier{};
+                return barrier;
+            }
+
+            if(data.type() == typeid(Image::Texture2*))
+            {
+                const auto image = std::any_cast<Image::Texture2*>(data);
+                if(!image)
+                {
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create barrier for Texture2 in SourceCluster , since the image is nullptr , name -> {}", name)});
+                }
+                VkImageMemoryBarrier2 barrier{};
+                return barrier;
+            }
+
+            if(data.type() == typeid(Image::Skybox2*))
+            {
+                const auto image = std::any_cast<Image::Skybox2*>(data);
+                if(!image)
+                {
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create barrier for Skybox2 in SourceCluster , since the image is nullptr , name -> {}", name)});
+                }
+                VkImageMemoryBarrier2 barrier{};
+                return barrier;
+            }
+            
+            if(data.type() == typeid(Buffer::BufferBase2*))
+            {
+                const auto image = std::any_cast<Buffer::BufferBase2*>(data);
+                if(!image)
+                {
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create barrier for BufferBase in SourceCluster , since the image is nullptr , name -> {}", name)});
+                }
+                VkBufferMemoryBarrier2 barrier{};
                 return barrier;
             }
 

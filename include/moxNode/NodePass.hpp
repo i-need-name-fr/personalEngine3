@@ -8,6 +8,7 @@
 #include "../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 #include "../Vulkan/Pipeline2/Pipeline2.hpp"
 #include <typeindex>
+#include "DynamicBarriers.hpp"
 namespace mox
 {
     // currently The NodePass is different from other passes within a simple changes
@@ -15,55 +16,6 @@ namespace mox
     // but before that we need to create a structures for it to perform as we wish 
 
     // this is required to RenderGraph to analyze the data type and compare it to stored value
-    enum moxNodeBindingType
-    {
-        // there are different types of binding, but we will be making only 5
-        moxNodeBindingSampler,
-        moxNodeBindingImage, // for all Render Images and so on 
-        moxNodeBindingBuffer, // doesnt matter if its Uniform ( Constant ) or storage Buffer
-        moxNodeBindingAccelerationStructure, // pretty simple
-        moxNodeBindingUndefined
-    };
-
-    enum moxNodePassRequestType
-    {
-        moxNodePassRequestAttachment,
-        moxNodePassRequestSet,
-        moxNodePassRequestUndefined
-    };
-
-    inline static std::string const moxNodePassUndefinedName = "__MX_GRAPH_RENDER_UNDEFINED_ATTACHMENT_NAME__";
-
-    // request defines which type of attachment are required , sets also included
-    struct moxNodePassRequest
-    {
-        std::string name{moxNodePassUndefinedName}; // doesnt really matter if its set or attachment , both has a name
-        std::string sourceName{moxNodePassUndefinedName}; // only for attachment, probably will 
-        moxNodePassRequestType requestType{moxNodePassRequestUndefined}; // defines what we are looking for , a set or an attachment
-        moxNodeBindingType bindingType{moxNodeBindingUndefined}; // only for attachment
-    };
-
-    struct moxNodeRenderFeedback
-    {   
-        std::string name{};
-        SourceCluster* set{nullptr};
-        std::any attachment{};
-        moxNodePassRequestType type{moxNodePassRequestUndefined};
-    };
-
-    struct moxNodePassAlternativeSource
-    {
-        SourceCluster* source;
-        std::uint32_t index;
-    };
-
-    struct moxNodePassResource
-    {
-        std::any data{};
-        VkDescriptorType type{};
-        std::uint32_t binding{};
-        std::uint32_t count{};
-    };
 
     inline static std::string const moxNodeRenderGeneralSet = "__MX_DSET_GENERAL_SET__"; // this is 
     inline static std::string const moxNodePassDefaultName = "__MX_GRAPH_P3_DEFAULT_NAME__";
@@ -132,7 +84,7 @@ namespace mox
         {
             generalAttachments = {};
             cSources = {};
-            _dBarrier = {};
+            dynamicBarriers = nullptr;
             moxFILE.reset();
             containsPingPong = false;
             passName = moxNodePassDefaultName;
@@ -150,7 +102,7 @@ namespace mox
             passName = std::move(input.passName);
             generalAttachments = std::move(input.generalAttachments);
             cSources = std::move(input.cSources);
-            _dBarrier = std::move(input._dBarrier);
+            dynamicBarriers = std::move(input.dynamicBarriers);
             moxFILE = std::move(input.moxFILE);
             containsPingPong = input.containsPingPong;
 
@@ -158,14 +110,6 @@ namespace mox
             input.moxFILE.reset();
             input.containsPingPong = false;
         }
-
-        // we need a structure that stores all dynamic barriers , for bindBarriers to work perfectly without need for allocating memory every frame
-        struct moxDynamicBarrier
-        {
-            std::vector<VkBufferMemoryBarrier2> buffers{};
-            std::vector<VkImageMemoryBarrier2> images{};
-            VkDependencyInfo dep{};
-        };
 
         moxContext2* context{nullptr};
         std::string passName{moxNodePassDefaultName};
@@ -215,16 +159,10 @@ namespace mox
 
         // barriers
 
-        MOX_NO_DISCARD ErrorDataOutput<void> createBarriers(const VkPipelineStageFlags2 stage , const std::uint32_t frameID ) noexcept
-        {
-            return _implCreateDBarrier(stage , frameID);
-        }
-
         [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> bindBarrier(VkCommandBuffer &cmd ,const VkPipelineStageFlags2 stage) noexcept
         {
-            const auto result = createBarriers(stage , context->sc->frameIndex);
-            if(!result.has_value()) return result;
-            return _implBindBarriers(cmd);
+            dynamicBarriers->execute(cmd , stage);
+            return {};
         }
 
         MOX_NO_DISCARD pDescriptorBuffer2 getCurrentDBuffer(const std::vector<pDescriptorBuffer2> &buffers) const noexcept
@@ -367,7 +305,7 @@ namespace mox
         std::vector<VkDeviceSize> __doffsets{};
         std::vector<std::string> __dbNames{}; // instruction to which db bind and at which position
         std::vector<VkDescriptorBufferBindingInfoEXT> __dbBindingInfo{};
-        std::vector<std::optional<moxDynamicBarrier>> _dBarrier{}; // 1 element , or 2 for ping pong , chosen by frameIndex % 2
+        utils::pDynamicBarriers dynamicBarriers{}; // created in analyzeFeedBack , when all the resources of GENERAL and all the SourceClusters are known
         bool __hasGeneralSet{false};
 
         moxNodeBindingType _implTransferTypeToData(const VkDescriptorType type) const noexcept
@@ -396,166 +334,11 @@ namespace mox
             return moxNodeBindingUndefined;
         }
 
-        MOX_NO_DISCARD ErrorDataOutput<void> _implProcessSourceBarrier(const DescriptorAttachment& binding , VkPipelineStageFlags2 const stage , moxDynamicBarrier& barriers , const std::any& source) noexcept
-        {
-            if(binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || binding.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            {
-                if(source.type() == typeid(Buffer::BufferBase2*))
-                {
-                    const auto buffer = std::any_cast<Buffer::BufferBase2*>(source);
-                    if(!buffer) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has null Buffer (BufferBase2*) , binding from -> {}, from -> {}" , binding.name , binding.source)});
-                    const auto barrier = buffer->translateBuffer(binding.action , stage);
-                    barriers.buffers.push_back(barrier);
-                    return {};
-                }
-
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has different type of class from provided one , binding from -> {}, from -> {}" , binding.name , binding.source)});
-            }
-            if(binding.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || binding.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-            {
-                if(source.type() == typeid(Image::RenderImage2*))
-                {
-                    const auto& image = std::any_cast<Image::RenderImage2*>(source);
-                    if(!image) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has null image (RenderImage2*) , binding from -> {}, from -> {}" , binding.name , binding.source)});
-
-                    const auto barrier = image->translateImage(binding.action , stage);
-                    barriers.images.push_back(barrier);
-                    return {};
-                }
-
-                if(source.type() == typeid(Image::Skybox2*))
-                {
-                    const auto& image = std::any_cast<Image::Skybox2*>(source);
-                    if(!image) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has null image (Skybox2*) , binding from -> {}, from -> {}" , binding.name , binding.source)});
-
-                    const auto barrier = image->translateImage(binding.action , stage);
-                    barriers.images.push_back(barrier);
-                    return {};
-                }
-
-                if(source.type() == typeid(Image::Texture2*))
-                {
-                    const auto& image = std::any_cast<Image::Texture2*>(source);
-                    if(!image) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has null image (Texture2*) , binding from -> {}, from -> {}" , binding.name , binding.source)});
-
-                    const auto barrier = image->translateImage(binding.action , stage);
-                    barriers.images.push_back(barrier);
-                    return {};
-                }
-
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the DS attachment has different type of class from provided one , binding from -> {}, from -> {}" , binding.name , binding.source)});
-            }
-
-            return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process Source , since the source contains different type of data comparing to Descriptor request , binding -> {} , from -> {}" , binding.name , binding.source)});
-        }
-
         MOX_NO_DISCARD static std::string _implResolveName(const DescriptorAttachment& binding , const uint32_t frameParity) noexcept
         {
             if(!binding.pingPongSystem) return binding.name;
 
             return moxPingPongName(binding.name , moxPingPongIndex(frameParity , binding.pingPongIndex));
-        }
-
-        MOX_NO_DISCARD ErrorDataOutput<void> _implProcessAttachmentBarrier(const DescriptorAttachment& binding , VkPipelineStageFlags2 const stage , moxDynamicBarrier& barriers , const uint32_t frameParity) noexcept
-        {
-            const std::string resolvedName = _implResolveName(binding , frameParity);
-
-            if(binding.type == VK_DESCRIPTOR_TYPE_SAMPLER || binding.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) return {};
-
-            if(binding.action == VK_ACCESS_2_NONE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process descriptor attachment , since the action is undefined , binding -> {}, from {}" , binding.name ,binding.source )});
-
-            if(binding.source == DescriptorFile::_moxGeneralSet)
-            {
-                const auto it = generalAttachments.find(resolvedName);
-                if(it == generalAttachments.end())
-                {
-                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create dynamic barriers , since the GENERAL set doesnt contain attachment -> {}" , resolvedName)});
-                }
-
-                // WARNING FOR BUFFERS
-                // EACH BUFFER IS BUFFERBASE2 , NOT GENERALBUFFER2
-                const auto result = _implProcessSourceBarrier(binding , stage , barriers , it->second.data);
-                if(!result.has_value()) return result;
-            }
-            else
-            {
-                // we are looking in source clusters
-                const auto clusterIt = cSources.find(binding.source);
-                if(clusterIt == cSources.end())
-                    return std::unexpected(mox::ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Dynamic barriers , since the descriptor set requires for Source Cluster-> {} , which doesnt exists , binding -> {} , from -> {}" , binding.source, binding.name ,binding.source )});
-
-                if(!clusterIt->second.source)
-                {
-                    return std::unexpected(mox::ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create Dynamic barriers , since the descriptor set requires for Source Cluster-> {} which is nullptr , binding -> {} , from -> {}" , binding.source, binding.name ,binding.source )});
-                }
-                const auto requestResult = clusterIt->second.source->requestBarrier(resolvedName , stage , binding.action);
-
-                if(!requestResult.has_value()) return std::unexpected(requestResult.error());
-
-                // now we have to analyze the output of requestedResult , it should be either VkImageMemoryBarrier or VkBufferMemoryBarrier
-                const auto variantData = requestResult.value();
-                // its either image or buffer
-                if(std::holds_alternative<VkImageMemoryBarrier2>(variantData))
-                {
-                    barriers.images.push_back(std::get<VkImageMemoryBarrier2>(variantData));
-                }
-                else
-                {
-                    barriers.buffers.push_back(std::get<VkBufferMemoryBarrier2>(variantData));
-                }
-            }
-
-            return {};
-        }
-
-        // the barriers have to be rebuilt EVERY frame : translateImage / translateBuffer change the stored state ( currentAccess , layout ) of the resource
-        // _dBarrier has 1 element , or 2 if the pass has ping pong , the element is chosen by frameIndex % 2
-        // the vectors are cleared , not freed , so after the first frame there are no allocations
-        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> _implCreateDBarrier(const VkPipelineStageFlags2 stage , const uint64_t frameIndex) noexcept
-        {
-            if(!moxFILE)
-            {
-                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process NodePass dynamic Barriers , since the file is not being created"});
-            }
-
-            const size_t slots = containsPingPong ? 2 : 1;
-            if(_dBarrier.size() != slots) _dBarrier.resize(slots);
-
-            const uint32_t frameParity = static_cast<uint32_t>(frameIndex % 2);
-            auto& slot = _dBarrier[containsPingPong ? frameParity : 0];
-
-            size_t attachmentCount = 0;
-            for(const auto& pset : moxFILE->sets) attachmentCount += pset.second.attachments.size();
-
-            if(!slot) slot.emplace();
-            moxDynamicBarrier& barriers = *slot;
-            barriers.buffers.clear();
-            barriers.images.clear();
-            barriers.buffers.reserve(attachmentCount);
-            barriers.images.reserve(attachmentCount);
-
-            for(const auto& pset : moxFILE->sets)
-            {
-                for(const auto& att : pset.second.attachments)
-                {
-                    const auto result = _implProcessAttachmentBarrier(att.second , stage , barriers , frameParity);
-                    if(!result.has_value())
-                    {
-                        slot.reset(); // half filled barrier must never be used
-                        return result;
-                    }
-                }
-            }
-
-            // the pointers are taken only after everything is pushed , since push_back can move the data
-            barriers.dep = {};
-            barriers.dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            barriers.dep.pBufferMemoryBarriers = barriers.buffers.data();
-            barriers.dep.bufferMemoryBarrierCount = static_cast<uint32_t>(barriers.buffers.size());
-            barriers.dep.pImageMemoryBarriers = barriers.images.data();
-            barriers.dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.images.size());
-
-            return {};
         }
 
         MOX_NO_DISCARD ErrorDataOutput<std::vector<moxNodePassRequest>> _implSendRequestGR3() noexcept
@@ -566,8 +349,6 @@ namespace mox
             // now we analyze the file
             
             std::vector<moxNodePassRequest> request{};
-            // basically we need to request RenderGraph for sets and attachment
-            // the flag comes from the file , so a ping pong attachment inside a SourceCluster set counts too
             containsPingPong = moxFILE->containsPingPong;
             for(const auto& setp : moxFILE.value().sets )
             {
@@ -726,32 +507,6 @@ namespace mox
 
         uint8_t containsPingPong = false;
 
-        [[gnu::hot]] MOX_NO_DISCARD ErrorDataOutput<void> _implBindBarriers(VkCommandBuffer& cmd) noexcept
-        {
-            if(!cmd) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers , since the command buffer is nullptr"});
-            if(_dBarrier.empty()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers , since the barriers are empty"});
-
-            if(containsPingPong)
-            {
-                const uint32_t id = context->sc->frameIndex % 2;
-                if(!_dBarrier[id].has_value()) 
-                {
-                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers WITH ping pong , since the first barrier is not existing"});
-                }
-                vkCmdPipelineBarrier2(cmd , &_dBarrier[id].value().dep);
-            }
-            else
-            {   
-                if(!_dBarrier[0].has_value()) 
-                {
-                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate barriers WITHOUT ping pong , since the first barrier is not existing"});
-                }
-                vkCmdPipelineBarrier2(cmd , &_dBarrier[0].value().dep);
-            }
-
-            return {};
-        }
-
         // feedback not includes GENERAL set , only general attachment and source cluster that are been requested
         MOX_NO_DISCARD ErrorDataOutput<void> _implProcessGRFeedback(const std::vector<moxNodeRenderFeedback> &feedback) noexcept
         {   
@@ -790,6 +545,33 @@ namespace mox
                     return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process NodePass feedback of GR , since feedback contains smth that wasnt requested , attachment -> {}" , source.name)});
                 }
             }
+
+            // now all the resources of GENERAL and all the SourceClusters are known , so the barriers can be created and checked ( once )
+            return _implCreateDynamicBarriers();
+        }
+
+        MOX_NO_DISCARD ErrorDataOutput<void> _implCreateDynamicBarriers() noexcept
+        {
+            if(!moxFILE) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create the dynamic barriers , since the moxFILE isnt being created , graph name -> {}" , passName)});
+            if(!context) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create the dynamic barriers , since the context is nullptr , graph name -> {}" , passName)});
+
+            utils::DynamicBarriers::CreateInfo createInfo{};
+            createInfo.general = generalAttachments;
+            createInfo.sources = cSources;
+            createInfo.file = moxFILE.value();
+            createInfo.stage = 0;
+            createInfo.context = context;
+
+            try
+            {
+                dynamicBarriers = std::make_shared<utils::DynamicBarriers>(createInfo);
+            }
+            catch(const std::exception& e)
+            {
+                dynamicBarriers = nullptr;
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create the dynamic barriers of NodePass -> {} : {}" , passName , e.what())});
+            }
+
             return {};
         }
 

@@ -343,7 +343,6 @@ namespace MDL
 
                 SetData& set = data.sets.at(descriptor.source);
 
-                // the same NAME twice is allowed only for a ping pong resource ( CURRENT + PREV ) , they differ by the key
                 const std::string key = DescriptorFile::AttachmentKey(descriptor.name , descriptor.pingPongSystem , descriptor.pingPongIndex);
                 if(set.attachments.contains(key))
                 {
@@ -358,7 +357,6 @@ namespace MDL
                     }
                 }
 
-                // the binding is written in the file only in the GENERAL set , so only there it has to be unique
                 if(descriptor.source == "GENERAL")
                 {
                     for(const auto& other : set.attachments)
