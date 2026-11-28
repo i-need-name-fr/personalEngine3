@@ -68,9 +68,9 @@ namespace utils
         struct BarrierSource
         {
 
-            std::string source;
+            std::uint32_t isGeneral{0}; // 1 if the resource is from GENERAL , 0 if it is from a SourceCluster ( a number instead of a string , so the check every frame is cheap )
             std::string name;
-            SourceCluster* cluster{};
+            SourceCluster* cluster{}; // only for isGeneral == 0
             VkAccessFlags2 access;
 
         };
@@ -206,7 +206,7 @@ namespace utils
 
             for(auto&& [barrier , source] : std::views::zip(dbarriers[id].bufferBarriers , dbarriers[id].bufferSources) )
             {
-                if(!source.cluster) // GENERAL has no cluster
+                if(source.isGeneral)
                 {
                     barrier = _implGeneralBufferBarrier(source , stage);
                 }
@@ -218,7 +218,7 @@ namespace utils
 
             for(auto&& [barrier , source] : std::views::zip(dbarriers[id].imageBarriers , dbarriers[id].imageSources) )
             {
-                if(!source.cluster) // GENERAL has no cluster
+                if(source.isGeneral)
                 {
                     barrier = _implGeneralImageBarrier(source , stage);
                 }
@@ -301,7 +301,7 @@ namespace utils
                         }
 
                         BarrierSource b{};
-                        b.source = sourceName;
+                        b.isGeneral = 1;
                         b.access = att.action;
 
                         if(att.pingPongSystem)
@@ -392,7 +392,7 @@ namespace utils
                                 {
                                     BarrierSource b{};
                                     b.name = name0;
-                                    b.source = sourceName;
+                                    b.isGeneral = 0;
                                     b.cluster = cluster;
                                     b.access = att.action;
 
@@ -417,7 +417,7 @@ namespace utils
                                 {
                                     BarrierSource b{};
                                     b.name = name0;
-                                    b.source = sourceName;
+                                    b.isGeneral = 0;
                                     b.cluster = cluster;
                                     b.access = att.action;
 
@@ -453,7 +453,7 @@ namespace utils
                                 {
                                     BarrierSource b{};
                                     b.name = name0;
-                                    b.source = sourceName;
+                                    b.isGeneral = 0;
                                     b.cluster = cluster;
                                     b.access = att.action;
                                     for(auto& slot : dbarriers) slot.addBuffer(b); // 1 slot without ping pong , 2 with it
@@ -466,7 +466,7 @@ namespace utils
                                 {
                                     BarrierSource b{};
                                     b.name = name0;
-                                    b.source = sourceName;
+                                    b.isGeneral = 0;
                                     b.cluster = cluster;
                                     b.access = att.action;
                                     for(auto& slot : dbarriers) slot.addImage(b); // 1 slot without ping pong , 2 with it
