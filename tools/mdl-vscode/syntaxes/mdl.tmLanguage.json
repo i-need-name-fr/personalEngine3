@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MDL",
+  "scopeName": "source.mdl",
+  "patterns": [
+    { "name": "comment.line.double-slash.mdl", "match": "//.*$" },
+    { "match": "^\\s*(#include)\\s+([^\\s<]+)", "captures": { "1": { "name": "keyword.control.directive.mdl" }, "2": { "name": "entity.name.type.set.mdl" } } },
+    { "match": "^\\s*(\\[)([^\\]]+)(\\])", "captures": { "1": { "name": "punctuation.definition.set.mdl" }, "2": { "name": "entity.name.type.set.mdl" }, "3": { "name": "punctuation.definition.set.mdl" } } },
+    { "name": "storage.type.descriptor.mdl", "match": "\\b(StorageBuffer|UniformBuffer|StorageImage|Texture|ConstantBuffer|SampledImage)\\b" },
+    { "name": "constant.language.pingpong.mdl", "match": "\\b(CURRENT|PREV)\\b" },
+    { "name": "support.constant.access.mdl", "match": "\\b(Shader|Memory|Color|Depth)(Read|Write|Both)\\b" },
+    { "name": "constant.numeric.binding.mdl", "match": "\\b\\d+\\b" },
+    { "name": "punctuation.section.declaration.mdl", "match": "<<|>>" },
+    { "name": "punctuation.section.block.mdl", "match": "[{}]" }
+  ]
+}

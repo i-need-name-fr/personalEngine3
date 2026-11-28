@@ -1,0 +1,49 @@
+{
+  "name": "mdl-validator",
+  "displayName": "MDL - Mox Descriptor Language",
+  "description": "Syntax highlighting and validation of .mox files ( MDL ) : the sets , the brackets , the types , the access , the ping pong and the bindings .",
+  "version": "0.1.0",
+  "publisher": "pe3",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": [ "Programming Languages", "Linters" ],
+  "activationEvents": [ "onLanguage:mdl" ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mdl",
+        "aliases": [ "MDL", "Mox Descriptor Language" ],
+        "extensions": [ ".mox", ".mdl" ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mdl",
+        "scopeName": "source.mdl",
+        "path": "./syntaxes/mdl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      { "command": "mdl.rescanSets", "title": "MDL : Rescan the sets of SourceClusters" }
+    ],
+    "configuration": {
+      "title": "MDL",
+      "properties": {
+        "mdl.extraSets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Names of sets which exist but are not found by the scan of the sources ."
+        },
+        "mdl.sourceGlobs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [ "**/include/**/*.hpp" ],
+          "description": "Where to look for the names of SourceClusters ( static const std::string Name = \"...\" ) , relative to the open folder ."
+        }
+      }
+    }
+  }
+}

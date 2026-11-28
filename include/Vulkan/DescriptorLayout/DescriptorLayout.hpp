@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../vulkanContext/moxContext2.hpp"
-#include "../../MoxFIleReader/FileReader.hpp"
+#include "../../MDLCompiler/MDLCompiler.hpp"
 
 namespace mox{
 
@@ -124,7 +124,7 @@ namespace mox{
         {
             try{
 
-                const auto analyzedResult = DescriptorFile::AnalyzeFile(path);
+                const auto analyzedResult = MDL::Compiler::Compile(path);
                 // now when we got the data , we need to check if there is a GENERAL
                 if(!analyzedResult.has_value()) return std::unexpected(analyzedResult.error());
                 auto data = analyzedResult.value();

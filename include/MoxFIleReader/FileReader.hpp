@@ -12,14 +12,6 @@ namespace mox
 
     inline static const std::string moxUndefinedBehavior = "3094t030fvhj0405";
 
-    enum DescriptorAccess
-    {
-        moxDescriptorAccessUndefined,
-        moxDescriptorAccessWrite,
-        moxDescriptorAccessRead,
-        moxDescriptorAccessBoth
-    };
-
     #define MOX_GENERAL_SET_DEFAULT_INDEX 0ul
 
     struct DescriptorAttachment
@@ -30,7 +22,8 @@ namespace mox
         VkDescriptorType type{};
         uint32_t pingPongSystem{0};
         uint32_t pingPongIndex{0};
-        DescriptorAccess action{moxDescriptorAccessUndefined};
+        // the access is stored directly as Vulkan flags , VK_ACCESS_2_NONE = undefined
+        VkAccessFlags2 action{VK_ACCESS_2_NONE};
         uint32_t binding{0};
         // how many descriptors are in this binding , 1 for a simple one , more for an array
         uint32_t count{1};
@@ -51,7 +44,7 @@ namespace mox
         uint32_t totalBindingUsage{};
     };
 
-    class DescriptorFile final
+    class DescriptorFile final 
     {
     public:
         inline static const std::string _moxGeneralSet = "GENERAL";
@@ -68,14 +61,6 @@ namespace mox
         {
             if(!pingPongRequired) return name;
             return name + "@" + std::to_string(pingPongCurrent);
-        }
-
-        inline static VkAccessFlags2 TranslateToAccess(DescriptorAccess const &access) noexcept
-        {
-            if(access == moxDescriptorAccessWrite) return VK_ACCESS_2_SHADER_WRITE_BIT;
-            if(access == moxDescriptorAccessRead) return VK_ACCESS_2_SHADER_READ_BIT;
-            if(access == moxDescriptorAccessBoth) return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
-            return VK_ACCESS_2_NONE;
         }
 
     private:
@@ -96,23 +81,23 @@ namespace mox
         inline static const std::string _moxActionTypeRead = "READ";
         inline static const std::string _moxActionTypeBoth = "BOTH";
 
-        MOX_NO_DISCARD inline static ErrorDataOutput<DescriptorAccess> _implAnalyzeAction(const std::string action) noexcept
+        MOX_NO_DISCARD inline static ErrorDataOutput<VkAccessFlags2> _implAnalyzeAction(const std::string action) noexcept
         {
             if(action == _moxActionTypeUndefined)
             {
-                return moxDescriptorAccessUndefined;
+                return VK_ACCESS_2_NONE;
             }
             else if(action == _moxActionTypeWrite)
             {
-                return moxDescriptorAccessWrite;
+                return VK_ACCESS_2_SHADER_WRITE_BIT;
             }
             else if(action == _moxActionTypeRead)
             {
-                return moxDescriptorAccessRead;
+                return VK_ACCESS_2_SHADER_READ_BIT;
             }
             else if(action == _moxActionTypeBoth)
             {
-                return moxDescriptorAccessBoth;
+                return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
             }
 
             return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to analyze descriptor action , {}" , action)});

@@ -1,4 +1,4 @@
-[[SET_DATA]] SET_NAME: TextureHub SET_INDEX: 0
-[[SET_DATA]] SET_NAME: SceneBuffers SET_INDEX: 1
-[[SET_DATA]] SET_NAME: SceneImages SET_INDEX: 2
-[[SET_DATA]] SET_NAME: VertexHeap SET_INDEX: 3
+#include TextureHub<<0>>
+#include SceneBuffers<<1>>
+#include SceneImages<<2>>
+#include VertexHeap<<3>>
