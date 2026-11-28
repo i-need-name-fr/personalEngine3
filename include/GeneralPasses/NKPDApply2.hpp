@@ -52,17 +52,8 @@ namespace Passes
             const auto result = bindBarrier(cmd , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             MOX_CHECK_RESULT(result)
 
-            // now the shaders
-            VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};
-            VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
-
-            cmdBindShadersEXT(cmd , 1 , stage , shaders);
-            const uint32_t x = (128 * 128  + 128 + 127) / 128;
-            vkCmdDispatch(cmd , x , 1 , 1);
-
-            shaders[0] = nullptr;
-
-            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+            // Adam of the layer 1 ( NeuralBuffer::adamStep , processAdam.hlsl ) : it makes its own barriers
+            adam(cmd);
             return {};
         }
 
@@ -78,6 +69,7 @@ namespace Passes
         Source::SceneBuffers::RequestFeaturesFunctionType requestFeatures{};
         Source::AI::NKPD::requestTranslate translate{};
         Source::AI::NKPD::requestAnnulment annulment{};
+        Source::AI::NKPD::requestAdam adam{};
         
         void processDelete() noexcept override
         {
@@ -103,18 +95,6 @@ namespace Passes
                 pipe = std::make_shared<ShaderPipe2>(inputData.context);
                 const auto result = processPipe(pipe.get() , VK_SHADER_STAGE_COMPUTE_BIT);
                 MOX_CHECK_RESULT(result)
-
-                {
-                    ShaderObject2::CreateInfo info{};
-                    info.context = context;
-                    info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
-                    info.nextStage = 0;
-                    info.filePath = inputData.path_S + ".hlsl";
-                    info.layouts = pipe->getLayouts();
-                    info.pushes=  {};
-
-                    pipe->addShader(info);
-                }
             }
             catch(std::exception &e)
             {
@@ -140,6 +120,13 @@ namespace Passes
                 MOX_CHECK_RESULT(result)
 
                 annulment = result.value();
+            }
+
+            {
+                const auto result = cSources[Source::AI::NKPD::Name].source->requestFunction<Source::AI::NKPD::requestAdam>(Source::AI::NKPD::requestAdamHiddenName);
+                MOX_CHECK_RESULT(result)
+
+                adam = result.value();
             }
 
             return {};

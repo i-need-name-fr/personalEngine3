@@ -52,19 +52,8 @@ namespace Passes
             const auto result = bindBarrier(cmd , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             MOX_CHECK_RESULT(result)
 
-            const uint32_t x = ( 64 * 16 + 64 + 127 ) / 128;
-
-            // now the shaders
-            VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};
-            VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
-
-            cmdBindShadersEXT(cmd , 1 , stage , shaders);
-
-            vkCmdDispatch(cmd , x , 1 , 1);
-
-            shaders[0] = nullptr;
-
-            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+            // Adam of the layer ( NeuralBuffer::adamStep , processAdam.hlsl ) : it makes its own barriers
+            adam(cmd);
             return {};
         }
 
@@ -80,6 +69,7 @@ namespace Passes
         Source::SceneBuffers::RequestFeaturesFunctionType requestFeatures{};
         Source::AI::NeuralRadianceCache::requestAnnulment annulment{};
         Source::AI::NeuralRadianceCache::requestTranslate translate{};
+        Source::AI::NeuralRadianceCache::requestAdam adam{};
 
         void processDelete() noexcept override
         {
@@ -88,6 +78,7 @@ namespace Passes
             requestFeatures = {};
             translate = {};
             annulment = {};
+            adam = {};
             NodePass::processDelete();
         }
 
@@ -107,18 +98,6 @@ namespace Passes
                 pipe = std::make_shared<ShaderPipe2>(inputData.context);
                 const auto result = processPipe(pipe.get() , VK_SHADER_STAGE_COMPUTE_BIT);
                 MOX_CHECK_RESULT(result)
-
-                {
-                    ShaderObject2::CreateInfo info{};
-                    info.context = context;
-                    info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
-                    info.nextStage = 0;
-                    info.filePath = inputData.path_S + ".hlsl";
-                    info.layouts = pipe->getLayouts();
-                    info.pushes=  {};
-
-                    pipe->addShader(info);
-                }
             }
             catch(std::exception &e)
             {
@@ -146,8 +125,15 @@ namespace Passes
                 translate = result.value();
             }
 
+            {
+                const auto result = cSources[Source::AI::NeuralRadianceCache::Name].source->requestFunction<Source::AI::NeuralRadianceCache::requestAdam>(Source::AI::NeuralRadianceCache::requestAdamInputName);
+                MOX_CHECK_RESULT(result)
+
+                adam = result.value();
+            }
+
             return {};
-        }        
+        }
     };
 
     MOX_DECLARE_PTR_STRUCTURE(NRCApply1)

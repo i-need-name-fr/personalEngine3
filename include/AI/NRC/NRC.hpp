@@ -25,6 +25,11 @@ namespace AI
         using requestTranslate = std::function<void(VkCommandBuffer& , const mox::Source::AI::NeuralRadianceCache::TranslateType)>;
         using requestAnnulment = std::function<void(VkCommandBuffer&)>;
 
+        // Adam of one layer of the MLP : NeuralBuffer::adamStep ( processAdam.hlsl ) . the hash grid has its own shader
+        using requestAdam = std::function<void(VkCommandBuffer&)>;
+        inline static const std::string requestAdamInputName = "__MOX_NRC_REQUEST_ADAM_INPUT__";
+        inline static const std::string requestAdamOutputName = "__MOX_NRC_REQUEST_ADAM_OUTPUT__";
+
         inline static const std::string requestTranslateName = "__MOX_NRC_REQUEST_TRANSLATE_TO_NAME__";
         inline static const std::string requestAnnulmentName = "__MOX_NRC_REQUEST_ANNULMENT__";
 
@@ -196,6 +201,7 @@ namespace AI
                     info.max = 0.001f;
                     info.min = 0.00001f;
                     info.needsToWriteFile = true;
+                    info.learningRate = 1e-3f;   // NRC_LR_MLP
 
                     inputLayer = std::make_shared<Buffer::NeuralBuffer<64 , 16 , "NRC_inputLayer">>(info);
                 }
@@ -206,6 +212,7 @@ namespace AI
                     info.max = 0.001f;
                     info.min = 0.00001f;
                     info.needsToWriteFile = true;
+                    info.learningRate = 1e-3f;   // NRC_LR_MLP
 
                     outputLayer = std::make_shared<Buffer::NeuralBuffer<16 , 64 , "NRC_outputLayer">>(info);
                 }
@@ -289,6 +296,9 @@ namespace AI
             }
             return {};
         }
+
+        [[gnu::hot]] void _implAdamInput(VkCommandBuffer& cmd) noexcept { inputLayer->adamStep(cmd , NRCGeneralData.get()); }
+        [[gnu::hot]] void _implAdamOutput(VkCommandBuffer& cmd) noexcept { outputLayer->adamStep(cmd , NRCGeneralData.get()); }
 
         [[gnu::hot]] void _implAnnulment(VkCommandBuffer& cmd) noexcept
         {
@@ -385,6 +395,18 @@ namespace AI
                 // add 2 functions
                 requestTranslate function = [&](VkCommandBuffer& cmd , const TranslateType type) ->void{_implTranslate(cmd , type);};
                 const auto result = _implAddFunction(function , NeuralRadianceCache::requestTranslateName);
+                MOX_CHECK_RESULT(result)
+            }
+
+            {
+                NeuralRadianceCache::requestAdam function = [&](VkCommandBuffer& cmd) -> void{_implAdamInput(cmd);};
+                const auto result = _implAddFunction(function , NeuralRadianceCache::requestAdamInputName);
+                MOX_CHECK_RESULT(result)
+            }
+
+            {
+                NeuralRadianceCache::requestAdam function = [&](VkCommandBuffer& cmd) -> void{_implAdamOutput(cmd);};
+                const auto result = _implAddFunction(function , NeuralRadianceCache::requestAdamOutputName);
                 MOX_CHECK_RESULT(result)
             }
 

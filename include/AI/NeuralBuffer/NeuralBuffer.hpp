@@ -14,7 +14,7 @@
 #include <string>
 #include <string_view>
 #include "../../Vulkan/DescriptorBuffer2/DescriptorBuffer2.hpp"
-
+#include "../../Vulkan/ShaderPipe2/ShaderPipe2.hpp"
 
 namespace mox
 {
@@ -54,6 +54,8 @@ namespace Buffer
             // min >= max ( the default ) means Glorot : the range is +- sqrt( 6 / ( rows + colons ) )
             float min = 0.0f;
             float max = 0.0f;
+            // the learning rate of Adam ( processAdam.hlsl ) : NKPD 1e-4 , NRC 1e-3
+            float learningRate = 1e-4f;
         };
 
         pDeviceReadableBuffer gradsBuffer; // gradians                                  done
@@ -74,11 +76,99 @@ namespace Buffer
                 processDelete();
                 THROW_MESSAGE;
             }
+
+            {
+                const auto result = _implCreatePipe();
+                if(!result.has_value())
+                {
+                    // saveOnDestroy is set only after everything is created , so a failed object saves nothing
+                    engineLogger(result.error());
+                    processDelete();
+                    THROW_MESSAGE;
+                }
+            }
         }
 
         void translate_RowMajor(VkCommandBuffer& cmd) noexcept
         {
             _implTranslateGradsWeightsToRowMajor(cmd);
+        }
+
+        // the pipe of the optimizer ( processAdam.hlsl ) : once , before adamStep . NRC does not need it
+
+        // Adam for this layer : buffer is NKPDGeneral ( validCount , stepCount ) , the staging buffers must be already in the row major ( translate_RowMajor )
+        void adamStep(VkCommandBuffer& cmd , Buffer::BufferBase2* buffer) noexcept
+        {
+            if(!pipe) return;
+            {
+                VkDescriptorBufferBindingInfoEXT info{};
+                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info.pNext = nullptr;
+                info.address = pipe->buffers[0]->pBuffer;
+                info.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+
+                cmdBindDescriptorBuffersEXT(cmd , 1 , &info);
+
+                VkDeviceSize offset[] = {0};
+                const uint32_t indices[] = {0};
+                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 1 , indices , offset );
+            }
+
+            {
+                VkDescriptorBufferInfo buf{};
+                buf.buffer = buffer->buffer;
+                buf.offset = 0;
+                buf.range = VK_WHOLE_SIZE;
+
+                VkWriteDescriptorSet info{};
+                info.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                info.descriptorCount = 1;
+                info.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                info.pBufferInfo = &buf;
+                info.pImageInfo = nullptr;
+                info.pTexelBufferView = nullptr;
+                info.dstBinding = 0;
+                info.dstSet = nullptr;
+                cmdPushDescriptorSetKHR(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 1 , 1 , &info);
+            }
+
+            {
+                constexpr VkPipelineStageFlags2 cs = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                constexpr VkAccessFlags2 rd = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+                constexpr VkAccessFlags2 rw = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+
+                struct Item { Buffer::BufferBase2* buf; VkAccessFlags2 access; };
+                const std::array<Item , 6> items =
+                {{
+                    {stagingGradBuffer.get() , rd},     // the grads of the matrices ( converted )
+                    {gradsBuffer.get() , rd},           // the grads of the bias ( half ) from backstep
+                    {stagingWeightBuffer.get() , rw},   // adam writes the new weights here , the convert reads them later
+                    {weightBuffer.get() , rw},          // adam writes the bias ( the atomics )
+                    {paramBuffer.get() , rw},           // w , m , v , grad : the previous step wrote them
+                    {buffer , rd}                       // NKPDGeneral : validCount , stepCount
+                }};
+
+                std::array<VkBufferMemoryBarrier2 , 6> barriers{};
+                for(std::size_t i = 0 ; i < items.size() ; i++) barriers[i] = items[i].buf->translateBuffer(items[i].access , cs);
+
+                const auto dep = TypicalDependency<6>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+
+            VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};
+            VkShaderStageFlagBits stage[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
+
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
+
+            const struct { uint32_t M; uint32_t K; float lr; } push = {rows , colons , learningRate};
+            vkCmdPushConstants(cmd , pipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(push) , &push);
+
+            const uint32_t x = ((rows * colons + rows) + 255) / 256;
+
+            vkCmdDispatch(cmd , x , 1 , 1 );
+
+            shaders[0] = nullptr;
+            cmdBindShadersEXT(cmd , 1 , stage , shaders);
         }
 
         void addBindings(std::vector<DescriptorData2> &data , const uint32_t firstBinding) noexcept
@@ -135,6 +225,7 @@ namespace Buffer
         ::AI::ptrData pointers{};
         inline static std::random_device rndDevice{};
         moxContext2* context{nullptr};
+        float learningRate{1e-4f};
         std::filesystem::path weightFile{};
         std::filesystem::path paramsFile{}; 
         bool saveOnDestroy{false};
@@ -142,6 +233,8 @@ namespace Buffer
         std::array<VkConvertCooperativeVectorMatrixInfoNV , 2> _fromTraining{};
 
         std::array<std::shared_ptr<std::uint64_t> , 4> ptrs{};
+
+        pShaderPipe2 pipe{};
 
         static constexpr VkDeviceSize ALIGNMENT = 64;
         static constexpr VkDeviceSize _implAlignUp(const VkDeviceSize value) noexcept
@@ -199,11 +292,13 @@ namespace Buffer
             weightFile = std::move(input.weightFile);
             paramsFile = std::move(input.paramsFile);
             saveOnDestroy = input.saveOnDestroy;
+            learningRate = input.learningRate;
 
             // the infos hold the device addresses ( the buffers are the same , so they stay valid ) and the pDstSize of the shared values
             _toTraining = input._toTraining;
             _fromTraining = input._fromTraining;
             ptrs = std::move(input.ptrs);
+            pipe = std::move(input.pipe);
 
             // the moved object is empty and saves nothing
             input.saveOnDestroy = false;
@@ -212,6 +307,7 @@ namespace Buffer
 
         void processDelete() noexcept
         {
+            deviceWaitIdle(context->logicalDevice->device);
             if(saveOnDestroy) _implSaveToFile();
             saveOnDestroy = false;
 
@@ -222,7 +318,7 @@ namespace Buffer
             stagingWeightBuffer = nullptr;
             ptrBuffer = nullptr;
             paramBuffer = nullptr;
-
+            pipe = nullptr;
             offsets = {};
             pointers = {};
             context = nullptr;
@@ -235,8 +331,95 @@ namespace Buffer
             ptrs = {};
         }
 
-        // the size of the matrix in the layout : vkConvertCooperativeVectorMatrixNV of the HOST with dstData = nullptr only returns the size , no command buffer is needed
-        // the size depends on the type , the layout and the sizes of the destination , not on the data of the source
+        ErrorDataOutput<void> _implCreatePipe() noexcept
+        {
+            const std::filesystem::path file = std::filesystem::path(std::source_location::current().file_name()).parent_path() / std::filesystem::path("processAdam.hlsl");
+            try
+            {
+                pipe = std::make_shared<ShaderPipe2>(context);
+
+                {
+                    std::vector<DescriptorLayoutData> data(7);
+                    data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[1] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[4] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[5] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[6] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    
+                    DescriptorLayout::CreateInfo info{};
+                    info.context = context;
+                    info.data = data;
+                    info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+                    info.pNext = nullptr;
+                    info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                    pipe->addDescriptorLayout(info);
+                }
+
+                {
+                    DescriptorLayoutData data = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    DescriptorLayout::CreateInfo info{};
+                    info.context = context;
+                    info.data = {data};
+                    info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
+                    info.pNext = nullptr;
+                    info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                    pipe->addDescriptorLayout(info);
+                }
+
+                VkPushConstantRange range{};
+                range.offset = 0;
+                range.size = sizeof(uint32_t) * 3;   // M , K , learning rate   
+                range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                {
+                    PipelineLayout::CreateInfo info{};
+                    info.ranges = {range};
+                    info.context = context;
+                    info.layouts =  {pipe->descriptorLayouts[0].get() , pipe->descriptorLayouts[1].get()};
+                    pipe->layout = std::make_shared<PipelineLayout>(info);
+                }
+
+                {
+                    std::vector<DescriptorData2> data(7);
+                    data[0] = DescriptorData2::createData(gradsBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0 );
+                    data[1] = DescriptorData2::createData(weightBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0 );
+                    data[2] = DescriptorData2::createData(infoBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,2 , 0 );
+                    data[3] = DescriptorData2::createData(stagingGradBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0 );
+                    data[4] = DescriptorData2::createData(stagingWeightBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0 );
+                    data[5] = DescriptorData2::createData(ptrBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0 );
+                    data[6] = DescriptorData2::createData(paramBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0 );
+
+                    DescriptorBuffer2::CreateInfo info{};
+                    info.context = context;
+                    info.data = data;
+                    info.layout = pipe->descriptorLayouts[0].get();
+
+                    pipe->addDescriptorBuffer2(info);
+                }
+
+                {
+                    ShaderObject2::CreateInfo info{};
+                    info.context = context;
+                    info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
+                    info.nextStage = 0;
+                    info.pushes = {range};
+                    info.filePath = file.string();
+                    info.layouts = {pipe->descriptorLayouts[0].get() , pipe->descriptorLayouts[1].get()};
+
+                    pipe->addShader(info);
+                }
+            }
+            catch(std::exception& e)
+            {
+                MOX_RETURN_ERROR(MOX_ERROR_TYPE_FAILED_CREATION , "failed to creater pipe for neural buffer");
+            }
+            return {};
+        }
+
         ErrorDataOutput<void> _implGetCoopSize(moxContext2* context , VkCooperativeVectorMatrixLayoutNV layout , VkDeviceSize& size) noexcept
         __attribute__((nonnull))
         {
@@ -348,6 +531,7 @@ namespace Buffer
                 MOX_RETURN_ERROR(MOX_ERROR_TYPE_CRITICAL , "failed to create NeuralBuffer , since the context is nullptr");
             }
             context = input.context;
+            learningRate = input.learningRate;
 
             std::vector<::AI::Parameter> params(PARAMETER_COUNT);
             std::vector<uint8_t> savedWeights{};

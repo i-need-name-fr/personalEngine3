@@ -54,6 +54,12 @@ namespace AI
         using requestTranslate = std::function<void(VkCommandBuffer& , const mox::Source::AI::NKPD::TranslateType)>;
         using requestAnnulment = std::function<void(VkCommandBuffer&)>;
 
+        // Adam of one layer : NeuralBuffer::adamStep ( processAdam.hlsl )
+        using requestAdam = std::function<void(VkCommandBuffer&)>;
+        inline static const std::string requestAdamInputName = "__MOX_NKPD_REQUEST_ADAM_INPUT__";
+        inline static const std::string requestAdamHiddenName = "__MOX_NKPD_REQUEST_ADAM_HIDDEN__";
+        inline static const std::string requestAdamOutputName = "__MOX_NKPD_REQUEST_ADAM_OUTPUT__";
+
         inline static const std::string requestTranslateName = "__MOX_NKPD_REQUEST_TRANSLATE_TO_NAME__";
         inline static const std::string requestAnnulmentName = "__MOX_NKPD_REQUEST_ANNULMENT__";
 
@@ -248,6 +254,10 @@ namespace AI
             outputLayer->annulment(cmd);
         }
 
+        [[gnu::hot]] void _implAdamInput(VkCommandBuffer& cmd) noexcept { inputLayer->adamStep(cmd , NKPDGeneral.get()); }
+        [[gnu::hot]] void _implAdamHidden(VkCommandBuffer& cmd) noexcept { hiddenLayer->adamStep(cmd , NKPDGeneral.get()); }
+        [[gnu::hot]] void _implAdamOutput(VkCommandBuffer& cmd) noexcept { outputLayer->adamStep(cmd , NKPDGeneral.get()); }
+
         // all the 3 layers change the layout of the weights and gradients ( the same as NRC , but 3 layers )
         [[gnu::hot]] void _implTranslate(VkCommandBuffer& cmd , const TranslateType type) noexcept
         {
@@ -340,6 +350,24 @@ namespace AI
             {
                 NKPD::requestTranslate function = [&](VkCommandBuffer& cmd , const TranslateType type) -> void{_implTranslate(cmd , type);};
                 const auto result = _implAddFunction(function , NKPD::requestTranslateName);
+                MOX_CHECK_RESULT(result)
+            }
+
+            {
+                NKPD::requestAdam function = [&](VkCommandBuffer& cmd) -> void{_implAdamInput(cmd);};
+                const auto result = _implAddFunction(function , NKPD::requestAdamInputName);
+                MOX_CHECK_RESULT(result)
+            }
+
+            {
+                NKPD::requestAdam function = [&](VkCommandBuffer& cmd) -> void{_implAdamHidden(cmd);};
+                const auto result = _implAddFunction(function , NKPD::requestAdamHiddenName);
+                MOX_CHECK_RESULT(result)
+            }
+
+            {
+                NKPD::requestAdam function = [&](VkCommandBuffer& cmd) -> void{_implAdamOutput(cmd);};
+                const auto result = _implAddFunction(function , NKPD::requestAdamOutputName);
                 MOX_CHECK_RESULT(result)
             }
 

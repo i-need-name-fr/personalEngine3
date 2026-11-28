@@ -1,15 +1,5 @@
 #pragma once
 
-// =============================== INFO ===============================
-// Passes.hpp - ALL the passes of the engine in one include :
-//
-//     #include "GeneralPasses/Passes.hpp"
-//
-// the headers are included in the order of the frame ( the g buffer , the light , the denoisers , the post process ) . every pass is in the namespace mox::Passes . when a new pass file is
-// added to this folder , it has to be added here too . the empty files ( NRCPass , PathTracing ) are included already : the pass appears when the file is written
-// =============================== END ===============================
-
-// the g buffer and the light preparation
 #include "mDeferredPass.hpp"
 #include "mRTPass.hpp"
 #include "ForwardPlus.hpp"
@@ -25,7 +15,6 @@
 #include "ReBLUR.hpp"
 #include "ReLAX.hpp"
 
-// the exposure , the tone mapping , the post process , the UI ( the last : it draws over the colour of HDR )
 #include "EVUpdatePass.hpp"
 #include "HDRAE.hpp"
 #include "HDR.hpp"
